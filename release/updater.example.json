@@ -1,0 +1,19 @@
+{
+  "version": "0.1.1",
+  "notes": "Release notes for the next Waey update.",
+  "pub_date": "2026-05-20T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "SIGNATURE_FROM_GENERATED_SIG_FILE",
+      "url": "https://github.com/waey/waey/releases/download/v0.1.1/Waey_0.1.1_x64-setup.exe"
+    },
+    "darwin-x86_64": {
+      "signature": "SIGNATURE_FROM_GENERATED_SIG_FILE",
+      "url": "https://github.com/waey/waey/releases/download/v0.1.1/Waey_0.1.1_x64.dmg"
+    },
+    "linux-x86_64": {
+      "signature": "SIGNATURE_FROM_GENERATED_SIG_FILE",
+      "url": "https://github.com/waey/waey/releases/download/v0.1.1/Waey_0.1.1_amd64.AppImage"
+    }
+  }
+}
