@@ -39,11 +39,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Tauri
-        uses: tauri-apps/tauri-action@v0      # ✅ الاسم الصح
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Release ${{ github.ref_name }}'
-          draft: false
-          prerelease: false
+          tauriScript: npm run app:build
