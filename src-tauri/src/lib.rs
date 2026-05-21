@@ -196,8 +196,12 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                 .build(),
         )?;
 
-        app.global_shortcut().register(registered_overlay_shortcut)?;
-        app.global_shortcut().register(registered_region_shortcut)?;
+        app.global_shortcut()
+            .register(registered_overlay_shortcut)
+            .map_err(|e| tauri::Error::from(anyhow::anyhow!(e.to_string())))?;
+        app.global_shortcut()
+            .register(registered_region_shortcut)
+            .map_err(|e| tauri::Error::from(anyhow::anyhow!(e.to_string())))?;
     }
 
     Ok(())

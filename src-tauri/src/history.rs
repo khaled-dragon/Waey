@@ -58,7 +58,7 @@ pub fn list_conversations(app: &AppHandle) -> Result<Vec<Conversation>, String> 
         )
         .map_err(|error| error.to_string())?;
 
-    statement
+    let rows = statement
         .query_map([], |row| {
             Ok(Conversation {
                 id: row.get(0)?,
@@ -69,7 +69,8 @@ pub fn list_conversations(app: &AppHandle) -> Result<Vec<Conversation>, String> 
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
 }
 
 pub fn create_conversation(
@@ -112,7 +113,7 @@ pub fn list_messages(app: &AppHandle, conversation_id: String) -> Result<Vec<Cha
         )
         .map_err(|error| error.to_string())?;
 
-    statement
+    let rows = statement
         .query_map(params![conversation_id], |row| {
             Ok(ChatMessage {
                 id: row.get(0)?,
@@ -125,7 +126,8 @@ pub fn list_messages(app: &AppHandle, conversation_id: String) -> Result<Vec<Cha
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
 }
 
 pub fn save_message(app: &AppHandle, draft: ChatMessageDraft) -> Result<ChatMessage, String> {
