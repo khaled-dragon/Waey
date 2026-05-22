@@ -211,7 +211,6 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             register_global_shortcuts(app)?;
             Ok(())
