@@ -33,12 +33,16 @@ fn hide_overlay_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn show_region_selector_window(app: AppHandle) -> Result<(), String> {
+    hide_window(&app, MAIN_WINDOW_LABEL)?;
     show_window(&app, REGION_WINDOW_LABEL)
 }
 
 #[tauri::command]
 fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
+    hide_window(&app, MAIN_WINDOW_LABEL)?;
+    std::thread::sleep(std::time::Duration::from_millis(150));
     let capture = capture_full_screen()?;
+    show_window(&app, MAIN_WINDOW_LABEL)?;
     app.emit(CAPTURE_READY_EVENT, &capture)
         .map_err(|error| error.to_string())?;
 
@@ -47,9 +51,9 @@ fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
 
 #[tauri::command]
 fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCapture, String> {
-    let capture = capture_screen_region(rect)?;
-
     hide_window(&app, REGION_WINDOW_LABEL)?;
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let capture = capture_screen_region(rect)?;
     show_window(&app, MAIN_WINDOW_LABEL)?;
     app.emit(CAPTURE_READY_EVENT, &capture)
         .map_err(|error| error.to_string())?;
@@ -59,7 +63,8 @@ fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCa
 
 #[tauri::command]
 fn cancel_region_selection(app: AppHandle) -> Result<(), String> {
-    hide_window(&app, REGION_WINDOW_LABEL)
+    hide_window(&app, REGION_WINDOW_LABEL)?;
+    show_window(&app, MAIN_WINDOW_LABEL)
 }
 
 #[tauri::command]
@@ -141,8 +146,9 @@ fn window_by_label(app: &AppHandle, label: &str) -> Result<WebviewWindow, String
 }
 
 fn show_overlay(app: &AppHandle) -> Result<(), String> {
+    hide_window(app, MAIN_WINDOW_LABEL)?;
+    std::thread::sleep(std::time::Duration::from_millis(150));
     let capture = capture_full_screen()?;
-
     show_window(app, MAIN_WINDOW_LABEL)?;
     app.emit(CAPTURE_READY_EVENT, &capture)
         .map_err(|error| error.to_string())
@@ -169,10 +175,10 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
             Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
         };
 
-        let overlay_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
-        let registered_overlay_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
-        let region_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
-        let registered_region_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
+        let overlay_shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Space);
+        let registered_overlay_shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Space);
+        let region_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+        let registered_region_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
 
         app.handle().plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -196,12 +202,12 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                 .build(),
         )?;
 
-        app.global_shortcut()
-            .register(registered_overlay_shortcut)
-            .map_err(|e| tauri::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-        app.global_shortcut()
-            .register(registered_region_shortcut)
-            .map_err(|e| tauri::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        if let Err(e) = app.global_shortcut().register(registered_overlay_shortcut) {
+            eprintln!("Failed to register overlay shortcut: {e}");
+        }
+        if let Err(e) = app.global_shortcut().register(registered_region_shortcut) {
+            eprintln!("Failed to register region shortcut: {e}");
+        }
     }
 
     Ok(())

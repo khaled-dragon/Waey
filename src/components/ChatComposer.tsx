@@ -12,33 +12,35 @@ export function ChatComposer({ streamState, onSubmitPrompt }: ChatComposerProps)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (isStreaming) {
-      return;
-    }
-
+    if (isStreaming || !prompt.trim()) return;
     await onSubmitPrompt(prompt);
     setPrompt("");
   }
 
+  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void onSubmitPrompt(prompt).then(() => setPrompt(""));
+    }
+  }
+
   return (
-    <form className="rounded-3xl border border-white/10 bg-black/25 p-3" onSubmit={handleSubmit}>
+    <form className="chat-composer" onSubmit={handleSubmit}>
       <textarea
-        className="min-h-28 w-full resize-none bg-transparent px-2 py-2 text-base text-white outline-none placeholder:text-white/35"
-        onChange={(event) => setPrompt(event.currentTarget.value)}
-        placeholder="Ask Waey about anything on your screen..."
+        className="composer-textarea"
+        onChange={(e) => setPrompt(e.currentTarget.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Ask Waey about your screen... (Enter to send)"
         value={prompt}
+        rows={2}
       />
-      <div className="flex items-center justify-between gap-3 pt-2">
-        <p className="text-xs text-white/45">Alt+Space opens overlay. Esc closes it.</p>
-        <button
-          className="rounded-full bg-waey-bright px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-waey-bright/20 transition hover:bg-waey-red disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isStreaming}
-          type="submit"
-        >
-          {isStreaming ? "Thinking..." : "Send"}
-        </button>
-      </div>
+      <button className="composer-send" disabled={isStreaming || !prompt.trim()} type="submit" title="Send">
+        {isStreaming ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+        )}
+      </button>
     </form>
   );
 }
