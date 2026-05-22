@@ -2,19 +2,19 @@ import { captureCurrentScreen, showRegionSelector } from "../features/capture";
 import type { LlmProvider, Persona } from "../shared/types";
 
 interface ActionBarProps {
-  onOpenPersonas: () => void;
+  onOpenPersonas?: () => void;
   providers: LlmProvider[];
   personas: Persona[];
-  onOpenHistory: () => void;
-  onOpenSettings: () => void;
+  onOpenHistory?: () => void;
+  onOpenSettings?: () => void;
   selectedPersonaId: string;
   selectedProviderId: string;
-  onOpenProviders: () => void;
+  onOpenProviders?: () => void;
   onSelectPersona: (personaId: string) => void;
   onSelectProvider: (providerId: string) => void;
 }
 
-export function ActionBar({ onOpenPersonas, providers, personas, onOpenHistory, onOpenSettings, selectedPersonaId, selectedProviderId, onOpenProviders, onSelectPersona, onSelectProvider }: ActionBarProps) {
+export function ActionBar({ providers, personas, selectedPersonaId, selectedProviderId, onSelectPersona, onSelectProvider }: ActionBarProps) {
   return (
     <div className="action-bar">
       <div className="action-bar-buttons">
