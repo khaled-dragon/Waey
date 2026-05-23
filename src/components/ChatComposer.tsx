@@ -4,9 +4,10 @@ import type { StreamState } from "../shared/types";
 interface ChatComposerProps {
   streamState: StreamState;
   onSubmitPrompt: (prompt: string) => Promise<void>;
+  isRtl: boolean;
 }
 
-export function ChatComposer({ streamState, onSubmitPrompt }: ChatComposerProps) {
+export function ChatComposer({ streamState, onSubmitPrompt, isRtl }: ChatComposerProps) {
   const [prompt, setPrompt] = useState("");
   const isStreaming = streamState === "streaming";
 
@@ -20,7 +21,9 @@ export function ChatComposer({ streamState, onSubmitPrompt }: ChatComposerProps)
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void onSubmitPrompt(prompt).then(() => setPrompt(""));
+      if (!isStreaming && prompt.trim()) {
+        void onSubmitPrompt(prompt).then(() => setPrompt(""));
+      }
     }
   }
 
@@ -30,16 +33,15 @@ export function ChatComposer({ streamState, onSubmitPrompt }: ChatComposerProps)
         className="composer-textarea"
         onChange={(e) => setPrompt(e.currentTarget.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Ask Waey about your screen... (Enter to send)"
+        placeholder={isRtl ? "اسأل Waey عن شاشتك..." : "Ask Waey about your screen..."}
         value={prompt}
         rows={2}
+        dir={isRtl ? "rtl" : "ltr"}
       />
-      <button className="composer-send" disabled={isStreaming || !prompt.trim()} type="submit" title="Send">
-        {isStreaming ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
-        )}
+      <button className="composer-send" disabled={isStreaming || !prompt.trim()} type="submit">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+        </svg>
       </button>
     </form>
   );

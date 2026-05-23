@@ -45,7 +45,6 @@ fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
     show_window(&app, MAIN_WINDOW_LABEL)?;
     app.emit(CAPTURE_READY_EVENT, &capture)
         .map_err(|error| error.to_string())?;
-
     Ok(capture)
 }
 
@@ -57,7 +56,6 @@ fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCa
     show_window(&app, MAIN_WINDOW_LABEL)?;
     app.emit(CAPTURE_READY_EVENT, &capture)
         .map_err(|error| error.to_string())?;
-
     Ok(capture)
 }
 
@@ -93,10 +91,7 @@ fn list_chat_conversations(app: AppHandle) -> Result<Vec<Conversation>, String> 
 }
 
 #[tauri::command]
-fn create_chat_conversation(
-    app: AppHandle,
-    draft: ConversationDraft,
-) -> Result<Conversation, String> {
+fn create_chat_conversation(app: AppHandle, draft: ConversationDraft) -> Result<Conversation, String> {
     create_conversation(&app, draft)
 }
 
@@ -156,7 +151,6 @@ fn show_overlay(app: &AppHandle) -> Result<(), String> {
 
 fn show_window(app: &AppHandle, label: &str) -> Result<(), String> {
     let window = window_by_label(app, label)?;
-
     window.show().map_err(|error| error.to_string())?;
     window.center().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
@@ -164,7 +158,6 @@ fn show_window(app: &AppHandle, label: &str) -> Result<(), String> {
 
 fn hide_window(app: &AppHandle, label: &str) -> Result<(), String> {
     let window = window_by_label(app, label)?;
-
     window.hide().map_err(|error| error.to_string())
 }
 
@@ -175,10 +168,10 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
             Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
         };
 
-        let overlay_shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Space);
-        let registered_overlay_shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Space);
-        let region_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-        let registered_region_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+        let overlay_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
+        let registered_overlay_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
+        let region_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
+        let registered_region_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
 
         app.handle().plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -186,13 +179,11 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-
                     if shortcut == &overlay_shortcut {
                         if let Err(error) = show_overlay(app) {
                             eprintln!("Failed to show Waey overlay: {error}");
                         }
                     }
-
                     if shortcut == &region_shortcut {
                         if let Err(error) = show_window(app, REGION_WINDOW_LABEL) {
                             eprintln!("Failed to show Waey region selector: {error}");
@@ -209,7 +200,6 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
             eprintln!("Failed to register region shortcut: {e}");
         }
     }
-
     Ok(())
 }
 

@@ -1,19 +1,18 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ActionBar } from "./components/ActionBar";
+import { OctopusMascot } from "./components/OctopusMascot";
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
-import { PersonaManager } from "./components/PersonaManager";
-import { ProviderManager } from "./components/ProviderManager";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useLlmChat } from "./features/chat";
-import { RegionSelector, useScreenCaptureEvents } from "./features/capture";
+import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen } from "./features/capture";
 import { useConversationHistory } from "./features/history";
 import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
 import { usePersonas } from "./features/personas";
 import { useProviders } from "./features/providers";
 import { useAppSettings } from "./features/settings";
+import { OctopusMascot } from "./components/OctopusMascot";
 
 function App() {
   const activeWindow = new URLSearchParams(window.location.search).get("window");
@@ -21,7 +20,7 @@ function App() {
   return <MainOverlay />;
 }
 
-type Panel = "chat" | "history" | "personas" | "providers" | "settings";
+type Panel = "chat" | "history" | "settings";
 
 function MainOverlay() {
   useOverlayShortcuts();
@@ -34,30 +33,22 @@ function MainOverlay() {
   const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, persistMessage, removeConversation, setMessages, startNewConversation } = useConversationHistory();
   const { errorMessage, streamState, submitPrompt } = useLlmChat({ ensureConversation, messages, persistMessage, setMessages });
 
+  const isRtl = settings.language === "ar";
+  const isDark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
   function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
   function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
 
-  const navItems: { id: Panel; icon: string; label: string }[] = [
-    { id: "chat", icon: "💬", label: "Chat" },
-    { id: "history", icon: "🕐", label: "History" },
-    { id: "providers", icon: "⚡", label: "Providers" },
-    { id: "personas", icon: "🎭", label: "Personas" },
-    { id: "settings", icon: "⚙️", label: "Settings" },
-  ];
-
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isDark ? "theme-dark" : "theme-light"}`} dir={isRtl ? "rtl" : "ltr"}>
       <div className="titlebar" data-tauri-drag-region>
         <div className="titlebar-left" data-tauri-drag-region>
-          <div className="app-logo">
-            <img src="/assets/logo.svg" alt="Waey" width="22" height="22" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-            <div className="app-logo-fallback">W</div>
-          </div>
+          <OctopusMascot size={26} state={streamState === "streaming" ? "thinking" : "idle"} />
           <span className="app-name">Waey</span>
           <span className="app-tagline">Screen-aware AI</span>
         </div>
         <div className="titlebar-controls">
-          <button className="ctrl-btn ctrl-min" onClick={() => invoke("hide_overlay_window")} title="Hide">
+          <button className="ctrl-btn ctrl-min" onClick={() => void invoke("hide_overlay_window")} title="Hide">
             <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="2" rx="1" fill="currentColor"/></svg>
           </button>
           <button className="ctrl-btn ctrl-close" onClick={() => void hideOverlayWindow()} title="Close">
@@ -66,37 +57,38 @@ function MainOverlay() {
         </div>
       </div>
 
+      <div className="toolbar">
+        <button className="screenshot-btn" onClick={() => void captureCurrentScreen()} type="button">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          {isRtl ? "إرفاق لقطة شاشة" : "Attach Screenshot"}
+        </button>
+      </div>
+
       <div className="app-body">
         <nav className="sidebar-nav">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item ${activePanel === item.id ? "nav-item--active" : ""}`}
-              onClick={() => setActivePanel(item.id)}
-              title={item.label}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              <span className="nav-label">{item.label}</span>
-            </button>
-          ))}
+          <button className={`nav-item ${activePanel === "chat" ? "nav-item--active" : ""}`} onClick={() => setActivePanel("chat")} title={isRtl ? "المحادثة" : "Chat"}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          </button>
+          <button className={`nav-item ${activePanel === "history" ? "nav-item--active" : ""}`} onClick={() => setActivePanel("history")} title={isRtl ? "السجل" : "History"}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </button>
+          <button className={`nav-item nav-item--bottom ${activePanel === "settings" ? "nav-item--active" : ""}`} onClick={() => setActivePanel("settings")} title={isRtl ? "الإعدادات" : "Settings"}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          </button>
         </nav>
 
         <main className="main-content">
-          {activePanel === "providers" ? (
-            <ProviderManager
-              onDeleteProvider={deleteProvider}
-              onSaveProvider={saveProvider}
-              onSelectProvider={setSelectedProviderId}
-              providers={providers}
-              selectedProviderId={selectedProviderId}
-            />
-          ) : activePanel === "personas" ? (
-            <PersonaManager
-              onDeletePersona={deletePersona}
-              onSavePersona={savePersona}
-              onSelectPersona={setSelectedPersonaId}
-              personas={personas}
-              selectedPersonaId={selectedPersonaId}
+          {activePanel === "history" ? (
+            <ConversationHistoryPanel
+              activeConversationId={activeConversationId}
+              conversations={conversations}
+              onDeleteConversation={removeConversation}
+              onOpenConversation={openConversation}
+              onStartNewConversation={startFreshConversation}
+              isRtl={isRtl}
             />
           ) : activePanel === "settings" ? (
             <SettingsPanel
@@ -104,34 +96,26 @@ function MainOverlay() {
               isLoading={isLoadingSettings}
               onChangeSettings={updateSettings}
               settings={settings}
-            />
-          ) : activePanel === "history" ? (
-            <ConversationHistoryPanel
-              activeConversationId={activeConversationId}
-              conversations={conversations}
-              onDeleteConversation={removeConversation}
-              onOpenConversation={openConversation}
-              onStartNewConversation={startFreshConversation}
+              providers={providers}
+              personas={personas}
+              selectedProviderId={selectedProviderId}
+              selectedPersonaId={selectedPersonaId}
+              onSelectProvider={setSelectedProviderId}
+              onSelectPersona={setSelectedPersonaId}
+              onSaveProvider={saveProvider}
+              onDeleteProvider={deleteProvider}
+              onSavePersona={savePersona}
+              onDeletePersona={deletePersona}
+              isRtl={isRtl}
             />
           ) : (
             <div className="chat-layout">
-              <ActionBar
-                onOpenHistory={() => setActivePanel("history")}
-                onOpenPersonas={() => setActivePanel("personas")}
-                onOpenProviders={() => setActivePanel("providers")}
-                onOpenSettings={() => setActivePanel("settings")}
-                onSelectPersona={setSelectedPersonaId}
-                onSelectProvider={setSelectedProviderId}
-                personas={personas}
-                providers={providers}
-                selectedPersonaId={selectedPersonaId}
-                selectedProviderId={selectedProviderId}
-              />
               <ResponsePanel
                 capture={latestCapture}
                 errorMessage={errorMessage ?? historyError ?? personaError}
                 messages={messages}
                 streamState={streamState}
+                isRtl={isRtl}
               />
               <ChatComposer
                 onSubmitPrompt={(prompt) => {
@@ -139,6 +123,7 @@ function MainOverlay() {
                   return submitPrompt(prompt, selectedProvider, latestCapture, selectedPersona);
                 }}
                 streamState={streamState}
+                isRtl={isRtl}
               />
             </div>
           )}

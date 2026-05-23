@@ -6,9 +6,10 @@ interface ResponsePanelProps {
   errorMessage: string | null;
   messages: ChatMessage[];
   streamState: StreamState;
+  isRtl: boolean;
 }
 
-export function ResponsePanel({ capture, errorMessage, messages, streamState }: ResponsePanelProps) {
+export function ResponsePanel({ capture, errorMessage, messages, streamState, isRtl }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
 
   return (
@@ -17,14 +18,16 @@ export function ResponsePanel({ capture, errorMessage, messages, streamState }: 
 
       {messages.length === 0 ? (
         <div className="response-empty">
-          <div className="response-empty-icon">🐙</div>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{opacity:0.3}}>
+            <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
           <div>
             {capture
-              ? `${capture.width} × ${capture.height}px captured — ready for your question`
-              : "Press Alt+Shift+Space to open with a screenshot, or use Smart Crop"}
+              ? `${capture.width} x ${capture.height}px ${isRtl ? "تم التقاطها" : "captured"}`
+              : isRtl ? "اضغط Alt+Space لفتح Waey مع لقطة شاشة" : "Press Alt+Space to open Waey with a screenshot"}
           </div>
           {previewUrl && (
-            <div className="capture-preview" style={{ width: "100%" }}>
+            <div className="capture-preview" style={{width:"100%"}}>
               <img alt="Screen capture" src={previewUrl} />
             </div>
           )}
@@ -33,19 +36,22 @@ export function ResponsePanel({ capture, errorMessage, messages, streamState }: 
         <>
           {capture && previewUrl && (
             <div className="capture-info">
-              📸 {capture.width} × {capture.height}px attached
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/>
+              </svg>
+              {capture.width} x {capture.height}px
             </div>
           )}
           {messages.map((message) => (
             <div key={message.id} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
-              <div className="message-role">{message.role === "user" ? "You" : "Waey"}</div>
-              <div className="message-bubble">{message.content || "Thinking..."}</div>
+              <div className="message-role">{message.role === "user" ? (isRtl ? "أنت" : "You") : "Waey"}</div>
+              <div className="message-bubble">{message.content || "..."}</div>
             </div>
           ))}
           {streamState === "streaming" && (
             <div className="message message--assistant">
               <div className="message-role">Waey</div>
-              <div className="message-bubble" style={{ color: "rgba(255,255,255,0.4)" }}>●●●</div>
+              <div className="message-bubble" style={{color:"var(--text-muted)"}}>...</div>
             </div>
           )}
         </>
