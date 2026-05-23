@@ -4,10 +4,9 @@
 
 body {
   background: transparent;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  margin: 0;
+  padding: 12px;
+  overflow: hidden;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -16,8 +15,8 @@ body {
   width: 100vw;
   height: 100vh;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 /* THEME VARIABLES */
@@ -83,14 +82,20 @@ body {
 
 /* APP SHELL */
 .app-shell {
-  width: 480px;
-  height: 560px;
+  width: fit-content;
+  height: fit-content;
+  min-width: 480px;
+  min-height: 560px;
+
   background: var(--bg-base);
   border: 1px solid var(--border-main);
-  border-radius: 10px;
+  border-radius: 16px;
+  padding: 10px;
+
   display: flex;
   flex-direction: column;
   overflow: hidden;
+
   box-shadow: 0 24px 64px rgba(0,0,0,0.6);
   color: var(--text-primary);
   font-size: 13px;

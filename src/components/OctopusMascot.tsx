@@ -119,9 +119,6 @@ export function OctopusMascot({ state = "idle", size = 38 }: Props) {
   const p = tentaclePhase;
 
   // Tentacle wave function
-  const tw = (base: number, amp: number, freq: number, offset: number) =>
-    base + amp * Math.sin(p * freq + offset);
-
   return (
     <svg
       ref={svgRef}

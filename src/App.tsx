@@ -12,7 +12,6 @@ import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
 import { usePersonas } from "./features/personas";
 import { useProviders } from "./features/providers";
 import { useAppSettings } from "./features/settings";
-import { OctopusMascot } from "./components/OctopusMascot";
 
 function App() {
   const activeWindow = new URLSearchParams(window.location.search).get("window");
