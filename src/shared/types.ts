@@ -61,6 +61,12 @@ export interface ScreenCapture {
   createdAt: number;
 }
 
+export interface ScreenCaptureError {
+  source: ScreenCaptureSource;
+  message: string;
+  createdAt: number;
+}
+
 export interface CaptureRect {
   x: number;
   y: number;

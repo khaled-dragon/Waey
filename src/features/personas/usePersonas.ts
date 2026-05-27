@@ -36,6 +36,7 @@ export function usePersonas() {
       const savedPersona = await savePromptPersona(persona);
       await refreshPersonas();
       setSelectedPersonaId(savedPersona.id);
+      return savedPersona;
     },
     [refreshPersonas],
   );

@@ -40,6 +40,7 @@ export function useProviders() {
       const savedProvider = await saveLlmProvider(provider);
       await refreshProviders();
       setSelectedProviderId(savedProvider.id);
+      return savedProvider;
     },
     [refreshProviders],
   );

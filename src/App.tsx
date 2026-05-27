@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { OctopusMascot } from "./components/OctopusMascot";
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import type { PersonaDraft, ProviderDraft } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen } from "./features/capture";
 import { useConversationHistory } from "./features/history";
@@ -23,7 +24,7 @@ type Panel = "chat" | "history" | "settings";
 
 function MainOverlay() {
   useOverlayShortcuts();
-  const { latestCapture } = useScreenCaptureEvents();
+  const { captureError, latestCapture } = useScreenCaptureEvents();
   const [activePanel, setActivePanel] = useState<Panel>("chat");
 
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
@@ -35,8 +36,54 @@ function MainOverlay() {
   const isRtl = settings.language === "ar";
   const isDark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
+  useEffect(() => {
+    const savedProviderId = settings.selectedProviderId;
+
+    if (savedProviderId && providers.some((provider) => provider.id === savedProviderId)) {
+      setSelectedProviderId(savedProviderId);
+    }
+  }, [providers, settings.selectedProviderId, setSelectedProviderId]);
+
+  useEffect(() => {
+    const savedPersonaId = settings.selectedPersonaId;
+
+    if (savedPersonaId && personas.some((persona) => persona.id === savedPersonaId)) {
+      setSelectedPersonaId(savedPersonaId);
+    }
+  }, [personas, settings.selectedPersonaId, setSelectedPersonaId]);
+
   function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
   function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
+  function selectProvider(id: string) {
+    setSelectedProviderId(id);
+    void updateSettings({ ...settings, selectedProviderId: id });
+  }
+  function selectPersona(id: string) {
+    setSelectedPersonaId(id);
+    void updateSettings({ ...settings, selectedPersonaId: id });
+  }
+  async function saveProviderAndSelect(draft: ProviderDraft) {
+    const provider = await saveProvider(draft);
+    void updateSettings({ ...settings, selectedProviderId: provider.id });
+  }
+  async function deleteProviderAndClear(id: string) {
+    await deleteProvider(id);
+
+    if (selectedProviderId === id || settings.selectedProviderId === id) {
+      void updateSettings({ ...settings, selectedProviderId: "" });
+    }
+  }
+  async function savePersonaAndSelect(draft: PersonaDraft) {
+    const persona = await savePersona(draft);
+    void updateSettings({ ...settings, selectedPersonaId: persona.id });
+  }
+  async function deletePersonaAndClear(id: string) {
+    await deletePersona(id);
+
+    if (selectedPersonaId === id || settings.selectedPersonaId === id) {
+      void updateSettings({ ...settings, selectedPersonaId: "" });
+    }
+  }
 
   return (
     <div className={`app-shell ${isDark ? "theme-dark" : "theme-light"}`} dir={isRtl ? "rtl" : "ltr"}>
@@ -57,7 +104,7 @@ function MainOverlay() {
       </div>
 
       <div className="toolbar">
-        <button className="screenshot-btn" onClick={() => void captureCurrentScreen()} type="button">
+        <button className="screenshot-btn" onClick={() => void captureCurrentScreen().catch(() => undefined)} type="button">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
             <circle cx="12" cy="13" r="4"/>
@@ -99,19 +146,19 @@ function MainOverlay() {
               personas={personas}
               selectedProviderId={selectedProviderId}
               selectedPersonaId={selectedPersonaId}
-              onSelectProvider={setSelectedProviderId}
-              onSelectPersona={setSelectedPersonaId}
-              onSaveProvider={saveProvider}
-              onDeleteProvider={deleteProvider}
-              onSavePersona={savePersona}
-              onDeletePersona={deletePersona}
+              onSelectProvider={selectProvider}
+              onSelectPersona={selectPersona}
+              onSaveProvider={saveProviderAndSelect}
+              onDeleteProvider={deleteProviderAndClear}
+              onSavePersona={savePersonaAndSelect}
+              onDeletePersona={deletePersonaAndClear}
               isRtl={isRtl}
             />
           ) : (
             <div className="chat-layout">
               <ResponsePanel
                 capture={latestCapture}
-                errorMessage={errorMessage ?? historyError ?? personaError}
+                errorMessage={errorMessage ?? captureError ?? historyError ?? personaError}
                 messages={messages}
                 streamState={streamState}
                 isRtl={isRtl}

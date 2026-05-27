@@ -59,6 +59,29 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
     finally { setSavingPersona(false); }
   }
 
+  function handleSelectProvider(provider: LlmProvider) {
+    onSelectProvider(provider.id);
+    setProviderError(null);
+    setProviderDraft({
+      id: provider.id,
+      name: provider.name,
+      kind: provider.kind,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: provider.model,
+    });
+  }
+
+  function handleSelectPersona(persona: Persona) {
+    onSelectPersona(persona.id);
+    setPersonaError(null);
+    setPersonaDraft({
+      id: persona.id,
+      name: persona.name,
+      prompt: persona.prompt,
+    });
+  }
+
   const tabs: { id: Tab; label: string; labelAr: string }[] = [
     { id: "general", label: "General", labelAr: "عام" },
     { id: "providers", label: "Providers", labelAr: "مزودون" },
@@ -146,13 +169,13 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
           <div className="item-list">
             {providers.length === 0 ? <div className="empty-list">{isRtl ? "لا يوجد مزودون بعد" : "No providers yet"}</div> : providers.map((p) => (
               <div key={p.id} className={`list-item ${selectedProviderId===p.id?"list-item--active":""}`}>
-                <button className="list-item-info" onClick={() => onSelectProvider(p.id)} type="button">
+                <button className="list-item-info" onClick={() => handleSelectProvider(p)} type="button">
                   <div className="list-item-name">{p.name}</div>
                   <div className="list-item-sub">{p.model}</div>
                 </button>
                 <div className="list-item-actions">
                   {selectedProviderId===p.id && <span className="badge-active">{isRtl ? "نشط" : "Active"}</span>}
-                  <button className="btn-secondary" onClick={() => void onDeleteProvider(p.id)} type="button">{isRtl ? "حذف" : "Delete"}</button>
+                  <button className="btn-secondary" onClick={() => { setProviderDraft(initialProviderDraft); void onDeleteProvider(p.id); }} type="button">{isRtl ? "حذف" : "Delete"}</button>
                 </div>
               </div>
             ))}
@@ -170,7 +193,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
           </form>
           <div className="item-list">
             <div className={`list-item ${selectedPersonaId===""?"list-item--active":""}`}>
-              <button className="list-item-info" onClick={() => onSelectPersona("")} type="button">
+              <button className="list-item-info" onClick={() => { onSelectPersona(""); setPersonaDraft(initialPersonaDraft); }} type="button">
                 <div className="list-item-name">{isRtl ? "Waey الافتراضي" : "Default Waey"}</div>
                 <div className="list-item-sub">{isRtl ? "مساعد واعٍ بالشاشة" : "Screen-aware assistant"}</div>
               </button>
@@ -178,13 +201,13 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             </div>
             {personas.map((p) => (
               <div key={p.id} className={`list-item ${selectedPersonaId===p.id?"list-item--active":""}`}>
-                <button className="list-item-info" onClick={() => onSelectPersona(p.id)} type="button">
+                <button className="list-item-info" onClick={() => handleSelectPersona(p)} type="button">
                   <div className="list-item-name">{p.name}</div>
                   <div className="list-item-sub" style={{overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{p.prompt}</div>
                 </button>
                 <div className="list-item-actions">
                   {selectedPersonaId===p.id && <span className="badge-active">{isRtl ? "نشط" : "Active"}</span>}
-                  <button className="btn-secondary" onClick={() => void onDeletePersona(p.id)} type="button">{isRtl ? "حذف" : "Delete"}</button>
+                  <button className="btn-secondary" onClick={() => { setPersonaDraft(initialPersonaDraft); void onDeletePersona(p.id); }} type="button">{isRtl ? "حذف" : "Delete"}</button>
                 </div>
               </div>
             ))}

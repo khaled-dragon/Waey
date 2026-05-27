@@ -11,6 +11,8 @@ pub struct AppSettings {
     pub theme: ThemePreference,
     pub language: LanguagePreference,
     pub auto_capture_on_overlay: bool,
+    pub selected_provider_id: Option<String>,
+    pub selected_persona_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -36,7 +38,9 @@ pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
         .map_err(|error| error.to_string())?;
 
     let rows = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|error| error.to_string())?;
 
     for row in rows {
@@ -53,13 +57,24 @@ pub fn save_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettin
 
     let connection = open_app_database(app)?;
     let values = [
-        ("hotkey_overlay", settings.hotkey_overlay.as_str()),
-        ("hotkey_region", settings.hotkey_region.as_str()),
-        ("theme", theme_to_string(&settings.theme)),
-        ("language", language_to_string(&settings.language)),
+        ("hotkey_overlay", settings.hotkey_overlay.clone()),
+        ("hotkey_region", settings.hotkey_region.clone()),
+        ("theme", theme_to_string(&settings.theme).to_string()),
+        (
+            "language",
+            language_to_string(&settings.language).to_string(),
+        ),
         (
             "auto_capture_on_overlay",
-            bool_to_string(settings.auto_capture_on_overlay),
+            bool_to_string(settings.auto_capture_on_overlay).to_string(),
+        ),
+        (
+            "selected_provider_id",
+            settings.selected_provider_id.clone().unwrap_or_default(),
+        ),
+        (
+            "selected_persona_id",
+            settings.selected_persona_id.clone().unwrap_or_default(),
         ),
     ];
 
@@ -84,6 +99,8 @@ pub fn default_settings() -> AppSettings {
         theme: ThemePreference::Dark,
         language: LanguagePreference::En,
         auto_capture_on_overlay: true,
+        selected_provider_id: None,
+        selected_persona_id: None,
     }
 }
 
@@ -106,6 +123,8 @@ fn apply_setting_value(settings: &mut AppSettings, key: &str, value: &str) {
         "theme" => settings.theme = theme_from_string(value),
         "language" => settings.language = language_from_string(value),
         "auto_capture_on_overlay" => settings.auto_capture_on_overlay = value == "true",
+        "selected_provider_id" => settings.selected_provider_id = optional_setting(value),
+        "selected_persona_id" => settings.selected_persona_id = optional_setting(value),
         _ => {}
     }
 }
@@ -145,5 +164,15 @@ fn bool_to_string(value: bool) -> &'static str {
         "true"
     } else {
         "false"
+    }
+}
+
+fn optional_setting(value: &str) -> Option<String> {
+    let trimmed_value = value.trim();
+
+    if trimmed_value.is_empty() {
+        None
+    } else {
+        Some(trimmed_value.to_string())
     }
 }

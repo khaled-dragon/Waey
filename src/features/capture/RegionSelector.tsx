@@ -33,7 +33,7 @@ export function RegionSelector() {
     event.currentTarget.releasePointerCapture(event.pointerId);
     if (selectionBox?.isReady) {
       const { x, y, width, height } = selectionBox;
-      void captureSelectedRegion({ x, y, width, height });
+      void captureSelectedRegion({ x, y, width, height }).catch(() => undefined);
     }
     setStartPoint(null); setCurrentPoint(null);
   }

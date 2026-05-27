@@ -6,4 +6,6 @@ export const DEFAULT_SETTINGS = {
   theme: "dark",
   language: "en",
   autoCaptureOnOverlay: true,
+  selectedProviderId: "",
+  selectedPersonaId: "",
 } as const;

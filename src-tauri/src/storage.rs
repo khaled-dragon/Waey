@@ -1,9 +1,28 @@
+use crate::logger;
 use rusqlite::Connection;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tauri::{AppHandle, Manager};
 
 pub fn open_app_database(app: &AppHandle) -> Result<Connection, String> {
-    let connection = Connection::open(database_path(app)?).map_err(|error| error.to_string())?;
+    let path = database_path(app)?;
+
+    match open_and_migrate_database(&path) {
+        Ok(connection) => Ok(connection),
+        Err(error) if should_recover_database(&error) => {
+            logger::error(format!("database recovery started: {error}"));
+            backup_database(&path)?;
+            open_and_migrate_database(&path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn open_and_migrate_database(path: &Path) -> Result<Connection, String> {
+    let connection = Connection::open(path).map_err(|error| error.to_string())?;
 
     connection
         .execute_batch("pragma foreign_keys = on;")
@@ -22,6 +41,34 @@ fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
 
     Ok(directory.join("waey.sqlite"))
+}
+
+fn backup_database(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let backup_path = path.with_extension(format!("sqlite.broken-{}", timestamp_seconds()));
+
+    fs::rename(path, &backup_path).map_err(|error| error.to_string())?;
+    logger::warn(format!(
+        "moved unreadable database to {}",
+        backup_path.to_string_lossy()
+    ));
+    Ok(())
+}
+
+fn should_recover_database(error: &str) -> bool {
+    let lower_error = error.to_lowercase();
+
+    lower_error.contains("malformed") || lower_error.contains("not a database")
+}
+
+fn timestamp_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
 }
 
 fn run_migrations(connection: &Connection) -> Result<(), String> {

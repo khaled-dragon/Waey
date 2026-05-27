@@ -1,34 +1,46 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import type { ScreenCapture } from "../../shared/types";
+import type { ScreenCapture, ScreenCaptureError } from "../../shared/types";
 
 const CAPTURE_READY_EVENT = "capture-ready";
+const CAPTURE_ERROR_EVENT = "capture-error";
 
 export function useScreenCaptureEvents() {
   const [latestCapture, setLatestCapture] = useState<ScreenCapture | null>(null);
+  const [captureError, setCaptureError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-    let removeListener: (() => void) | undefined;
+    let removeListeners: (() => void)[] = [];
 
-    void listen<ScreenCapture>(CAPTURE_READY_EVENT, (event) => {
-      if (isMounted) {
-        setLatestCapture(event.payload);
-      }
-    }).then((unlisten) => {
+    const pendingListeners = [
+      listen<ScreenCapture>(CAPTURE_READY_EVENT, (event) => {
+        if (isMounted) {
+          setLatestCapture(event.payload);
+          setCaptureError(null);
+        }
+      }),
+      listen<ScreenCaptureError>(CAPTURE_ERROR_EVENT, (event) => {
+        if (isMounted) {
+          setCaptureError(event.payload.message);
+        }
+      }),
+    ];
+
+    void Promise.all(pendingListeners).then((listeners) => {
       if (!isMounted) {
-        unlisten();
+        listeners.forEach((unlisten) => unlisten());
         return;
       }
 
-      removeListener = unlisten;
+      removeListeners = listeners;
     });
 
     return () => {
       isMounted = false;
-      removeListener?.();
+      removeListeners.forEach((unlisten) => unlisten());
     };
   }, []);
 
-  return { latestCapture, setLatestCapture };
+  return { captureError, latestCapture, setCaptureError, setLatestCapture };
 }
