@@ -13,8 +13,8 @@ interface ResponsePanelProps {
 export function ResponsePanel({ capture, errorMessage, messages, streamState, isRtl }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
   const bottomRef = useRef<HTMLDivElement>(null);
-  const lastAssistantMessage = messages.findLast((m) => m.role === "assistant");
-  const isStreamingWithContent = streamState === "streaming" && lastAssistantMessage && lastAssistantMessage.content.trim().length > 0;
+  const lastAssistantMessage = messages.slice().reverse().find((m: ChatMessage) => m.role === "assistant") ?? null;
+  const isStreamingWithContent = streamState === "streaming" && lastAssistantMessage !== null && lastAssistantMessage.content.trim().length > 0;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
