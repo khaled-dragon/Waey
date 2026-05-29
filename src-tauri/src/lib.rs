@@ -282,12 +282,12 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                         return;
                     }
 
-                    let overlay_is_focused = app
+                    let overlay_is_visible = app
                         .get_webview_window(MAIN_WINDOW_LABEL)
-                        .and_then(|w| w.is_focused().ok())
+                        .and_then(|w| w.is_visible().ok())
                         .unwrap_or(false);
 
-                    if overlay_is_focused {
+                    if overlay_is_visible {
                         return;
                     }
 
