@@ -161,7 +161,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             <input className="form-input" placeholder="Base URL" value={providerDraft.baseUrl} onChange={(e) => setProviderDraft((d) => ({...d, baseUrl: e.currentTarget.value}))} />
             <div className="form-row">
               <input className="form-input" placeholder={isRtl ? "نموذج" : "Model ID"} value={providerDraft.model} onChange={(e) => setProviderDraft((d) => ({...d, model: e.currentTarget.value}))} />
-              <input className="form-input" placeholder="API Key" type="password" value={providerDraft.apiKey} onChange={(e) => setProviderDraft((d) => ({...d, apiKey: e.currentTarget.value}))} />
+              <input className="form-input" placeholder="API Key" type="password" autoComplete="off" value={providerDraft.apiKey} onChange={(e) => setProviderDraft((d) => ({...d, apiKey: e.currentTarget.value}))} />
             </div>
             {providerError && <div className="error-inline">{providerError}</div>}
             <button className="btn-primary" disabled={savingProvider} type="submit">{savingProvider ? "..." : (isRtl ? "حفظ المزود" : "Save Provider")}</button>

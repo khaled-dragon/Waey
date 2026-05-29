@@ -57,7 +57,7 @@ export function useLlmChat({
 
       const conversationId = await ensureConversation(trimmedPrompt);
       const requestId = crypto.randomUUID();
-      const createdAt = Date.now();
+      const createdAt = Math.floor(Date.now() / 1000);
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "user",

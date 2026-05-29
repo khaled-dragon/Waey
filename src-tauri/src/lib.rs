@@ -281,6 +281,16 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
+
+                    let overlay_is_focused = app
+                        .get_webview_window(MAIN_WINDOW_LABEL)
+                        .and_then(|w| w.is_focused().ok())
+                        .unwrap_or(false);
+
+                    if overlay_is_focused {
+                        return;
+                    }
+
                     if shortcut == &overlay_shortcut {
                         if let Err(error) = show_overlay(app) {
                             logger::error(format!("failed to show Waey overlay: {error}"));

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { capturePreviewUrl } from "../features/capture";
 import type { ChatMessage, ScreenCapture, StreamState } from "../shared/types";
 
@@ -11,6 +12,13 @@ interface ResponsePanelProps {
 
 export function ResponsePanel({ capture, errorMessage, messages, streamState, isRtl }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const lastAssistantMessage = messages.findLast((m) => m.role === "assistant");
+  const isStreamingWithContent = streamState === "streaming" && lastAssistantMessage && lastAssistantMessage.content.trim().length > 0;
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamState]);
 
   return (
     <div className="response-panel">
@@ -45,15 +53,16 @@ export function ResponsePanel({ capture, errorMessage, messages, streamState, is
           {messages.map((message) => (
             <div key={message.id} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
               <div className="message-role">{message.role === "user" ? (isRtl ? "أنت" : "You") : "Waey"}</div>
-              <div className="message-bubble">{message.content || "..."}</div>
+              <div className="message-bubble">{message.content || (streamState === "streaming" && message.role === "assistant" ? "..." : "")}</div>
             </div>
           ))}
-          {streamState === "streaming" && (
+          {streamState === "streaming" && !isStreamingWithContent && (
             <div className="message message--assistant">
               <div className="message-role">Waey</div>
               <div className="message-bubble" style={{color:"var(--text-muted)"}}>...</div>
             </div>
           )}
+          <div ref={bottomRef} />
         </>
       )}
     </div>

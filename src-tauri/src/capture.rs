@@ -6,6 +6,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+const MAX_RETAINED_CAPTURES: usize = 10;
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenCapture {
@@ -46,6 +48,7 @@ pub fn capture_full_screen() -> Result<ScreenCapture, String> {
     let path = capture_path("full", created_at)?;
 
     image.save(&path).map_err(|error| error.to_string())?;
+    prune_old_captures();
 
     Ok(ScreenCapture {
         path: path_to_string(path),
@@ -71,6 +74,7 @@ pub fn capture_screen_region(rect: CaptureRect) -> Result<ScreenCapture, String>
     let path = capture_path("region", created_at)?;
 
     image.save(&path).map_err(|error| error.to_string())?;
+    prune_old_captures();
 
     Ok(ScreenCapture {
         path: path_to_string(path),
@@ -88,6 +92,33 @@ fn capture_path(prefix: &str, created_at: u128) -> Result<PathBuf, String> {
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
 
     Ok(directory.join(format!("{prefix}-{created_at}.png")))
+}
+
+fn prune_old_captures() {
+    let directory = std::env::temp_dir().join("waey").join("captures");
+
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return;
+    };
+
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("png"))
+        .collect();
+
+    if files.len() <= MAX_RETAINED_CAPTURES {
+        return;
+    }
+
+    files.sort_by_key(|path| {
+        path.metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    });
+
+    for path in files.iter().take(files.len() - MAX_RETAINED_CAPTURES) {
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn timestamp_millis() -> Result<u128, String> {

@@ -165,6 +165,10 @@ function MainOverlay() {
               />
               <ChatComposer
                 onSubmitPrompt={(prompt) => {
+                  if (!selectedProvider) {
+                    setActivePanel("settings");
+                    return Promise.resolve();
+                  }
                   setActivePanel("chat");
                   return submitPrompt(prompt, selectedProvider, latestCapture, selectedPersona);
                 }}
