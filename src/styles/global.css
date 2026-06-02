@@ -3,7 +3,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  background: transparent;
+  background: rgba(22, 7, 12, 0.01);
   margin: 0;
   padding: 12px;
   overflow: hidden;
@@ -99,6 +99,8 @@ body {
   box-shadow: 0 24px 64px rgba(0,0,0,0.6);
   color: var(--text-primary);
   font-size: 13px;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 /* TITLEBAR */
@@ -337,6 +339,8 @@ body {
   padding: 8px 11px; color: var(--text-primary);
   font-size: 12.5px; outline: none; font-family: inherit;
   transition: border-color 0.15s;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent-coral); }
 .form-input::placeholder, .form-textarea::placeholder { color: var(--text-placeholder); }

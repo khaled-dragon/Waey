@@ -282,12 +282,7 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                         return;
                     }
 
-                    let overlay_is_visible = app
-                        .get_webview_window(MAIN_WINDOW_LABEL)
-                        .and_then(|w| w.is_visible().ok())
-                        .unwrap_or(false);
-
-                    if overlay_is_visible {
+                    if any_waey_window_is_visible(app) {
                         return;
                     }
 
@@ -324,6 +319,16 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
         }
     }
     Ok(())
+}
+
+fn any_waey_window_is_visible(app: &AppHandle) -> bool {
+    [MAIN_WINDOW_LABEL, REGION_WINDOW_LABEL]
+        .iter()
+        .any(|label| {
+            app.get_webview_window(label)
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false)
+        })
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {

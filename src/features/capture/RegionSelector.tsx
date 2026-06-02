@@ -29,11 +29,11 @@ export function RegionSelector() {
     setCurrentPoint({ x: Math.round(event.clientX), y: Math.round(event.clientY) });
   }
 
-  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+  async function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
     event.currentTarget.releasePointerCapture(event.pointerId);
     if (selectionBox?.isReady) {
       const { x, y, width, height } = selectionBox;
-      void captureSelectedRegion({ x, y, width, height }).catch(() => undefined);
+      await captureSelectedRegion({ x, y, width, height }).catch(() => undefined);
     }
     setStartPoint(null); setCurrentPoint(null);
   }
