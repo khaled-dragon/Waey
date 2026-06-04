@@ -38,8 +38,8 @@ export function PersonaManager({ personas, selectedPersonaId, onDeletePersona, o
       </div>
 
       <form className="panel-form" onSubmit={handleSubmit}>
-        <input className="form-input" placeholder="Persona name, e.g. Arabic Explainer" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.currentTarget.value }))} />
-        <textarea className="form-textarea" placeholder="System prompt, e.g. Always explain in Arabic..." value={draft.prompt} onChange={(e) => setDraft((d) => ({ ...d, prompt: e.currentTarget.value }))} />
+        <input className="form-input" placeholder="Persona name, e.g. Arabic Explainer" value={draft.name} onChange={(e) => { const value = e.currentTarget.value; setDraft((d) => ({ ...d, name: value })); }} />
+        <textarea className="form-textarea" placeholder="System prompt, e.g. Always explain in Arabic..." value={draft.prompt} onChange={(e) => { const value = e.currentTarget.value; setDraft((d) => ({ ...d, prompt: value })); }} />
         {errorMessage && <div className="error-inline">{errorMessage}</div>}
         <button className="btn-primary" disabled={isSaving} type="submit">{isSaving ? "Saving..." : "Save Persona"}</button>
       </form>

@@ -43,6 +43,14 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
     void onChangeSettings({ ...settings, [key]: value });
   }
 
+  function updateProviderDraft<K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) {
+    setProviderDraft((draft) => ({ ...draft, [key]: value }));
+  }
+
+  function updatePersonaDraft<K extends keyof PersonaDraft>(key: K, value: PersonaDraft[K]) {
+    setPersonaDraft((draft) => ({ ...draft, [key]: value }));
+  }
+
   async function handleSaveProvider(e: FormEvent) {
     e.preventDefault();
     setSavingProvider(true); setProviderError(null);
@@ -151,17 +159,17 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
         <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
           <form className="panel-form" onSubmit={handleSaveProvider}>
             <div className="form-row">
-              <input className="form-input" placeholder={isRtl ? "اسم المزود" : "Provider name"} value={providerDraft.name} onChange={(e) => setProviderDraft((d) => ({...d, name: e.currentTarget.value}))} />
-              <select className="form-select" value={providerDraft.kind} onChange={(e) => { const k = e.currentTarget.value as ProviderKind; setProviderDraft((d) => ({...d, kind:k, baseUrl:defaultBaseUrl(k)})); }}>
+              <input className="form-input" placeholder={isRtl ? "اسم المزود" : "Provider name"} value={providerDraft.name} onChange={(e) => updateProviderDraft("name", e.currentTarget.value)} />
+              <select className="form-select" value={providerDraft.kind} onChange={(e) => { const kind = e.currentTarget.value as ProviderKind; setProviderDraft((draft) => ({...draft, kind, baseUrl:defaultBaseUrl(kind)})); }}>
                 <option value="openrouter">OpenRouter</option>
                 <option value="ollama">Ollama</option>
                 <option value="custom">OpenAI / Custom</option>
               </select>
             </div>
-            <input className="form-input" placeholder="Base URL" value={providerDraft.baseUrl} onChange={(e) => setProviderDraft((d) => ({...d, baseUrl: e.currentTarget.value}))} />
+            <input className="form-input" placeholder="Base URL" value={providerDraft.baseUrl} onChange={(e) => updateProviderDraft("baseUrl", e.currentTarget.value)} />
             <div className="form-row">
-              <input className="form-input" placeholder={isRtl ? "نموذج" : "Model ID"} value={providerDraft.model} onChange={(e) => setProviderDraft((d) => ({...d, model: e.currentTarget.value}))} />
-              <input className="form-input" placeholder="API Key" type="password" autoComplete="off" value={providerDraft.apiKey} onChange={(e) => setProviderDraft((d) => ({...d, apiKey: e.currentTarget.value}))} />
+              <input className="form-input" placeholder={isRtl ? "نموذج" : "Model ID"} value={providerDraft.model} onChange={(e) => updateProviderDraft("model", e.currentTarget.value)} />
+              <input className="form-input" placeholder="API Key" type="password" autoComplete="off" value={providerDraft.apiKey} onChange={(e) => updateProviderDraft("apiKey", e.currentTarget.value)} />
             </div>
             {providerError && <div className="error-inline">{providerError}</div>}
             <button className="btn-primary" disabled={savingProvider} type="submit">{savingProvider ? "..." : (isRtl ? "حفظ المزود" : "Save Provider")}</button>
@@ -186,8 +194,8 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
       {tab === "personas" && (
         <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
           <form className="panel-form" onSubmit={handleSavePersona}>
-            <input className="form-input" placeholder={isRtl ? "اسم الشخصية" : "Persona name"} value={personaDraft.name} onChange={(e) => setPersonaDraft((d) => ({...d, name: e.currentTarget.value}))} />
-            <textarea className="form-textarea" placeholder={isRtl ? "موجه النظام..." : "System prompt..."} value={personaDraft.prompt} onChange={(e) => setPersonaDraft((d) => ({...d, prompt: e.currentTarget.value}))} />
+            <input className="form-input" placeholder={isRtl ? "اسم الشخصية" : "Persona name"} value={personaDraft.name} onChange={(e) => updatePersonaDraft("name", e.currentTarget.value)} />
+            <textarea className="form-textarea" placeholder={isRtl ? "موجه النظام..." : "System prompt..."} value={personaDraft.prompt} onChange={(e) => updatePersonaDraft("prompt", e.currentTarget.value)} />
             {personaError && <div className="error-inline">{personaError}</div>}
             <button className="btn-primary" disabled={savingPersona} type="submit">{savingPersona ? "..." : (isRtl ? "حفظ الشخصية" : "Save Persona")}</button>
           </form>
