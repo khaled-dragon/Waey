@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Waey",
+  "version": "0.1.0",
+  "identifier": "com.waey.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Waey",
+        "width": 520,
+        "height": 600,
+        "minWidth": 520,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "center": true
+      },
+      {
+        "label": "region-selector",
+        "title": "Waey Smart Crop",
+        "url": "index.html?window=region-selector",
+        "fullscreen": true,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$TEMP/waey/captures/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "Productivity",
+    "copyright": "Copyright 2026 Waey",
+    "publisher": "Waey",
+    "shortDescription": "A screen-aware AI desktop assistant.",
+    "longDescription": "Waey opens over any app, captures screen context, and lets users ask an LLM about what they are seeing.",
+    "targets": "all",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico"
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
