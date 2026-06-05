@@ -12,17 +12,30 @@ interface ResponsePanelProps {
 
 export function ResponsePanel({ capture, errorMessage, messages, streamState, isRtl }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const lastAssistantMessage = messages.slice().reverse().find((m: ChatMessage) => m.role === "assistant") ?? null;
   const isStreamingWithContent = streamState === "streaming" && lastAssistantMessage !== null && lastAssistantMessage.content.trim().length > 0;
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (shouldStickToBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, streamState]);
+
+  function handleScroll() {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 48;
+  }
 
   return (
     <div className="response-panel">
-      {errorMessage && <div className="error-msg">{errorMessage}</div>}
+      <div className="response-scroll" onScroll={handleScroll} ref={scrollContainerRef}>
+        {errorMessage && <div className="error-msg">{errorMessage}</div>}
 
       {messages.length === 0 ? (
         <div className="response-empty">
@@ -64,7 +77,8 @@ export function ResponsePanel({ capture, errorMessage, messages, streamState, is
           )}
           <div ref={bottomRef} />
         </>
-      )}
+        )}
+      </div>
     </div>
   );
 }
