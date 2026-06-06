@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { OctopusMascot } from "./components/OctopusMascot";
 import { ChatComposer } from "./components/ChatComposer";
@@ -86,7 +86,7 @@ function MainOverlay() {
   }
   const appWindow = getCurrentWindow();
 
-  function handleTitlebarMouseDown(event: MouseEvent<HTMLDivElement>) {
+  function handleTitlebarPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".titlebar-controls")) return;
 
@@ -97,14 +97,13 @@ function MainOverlay() {
     <div className={`app-shell ${isDark ? "theme-dark" : "theme-light"}`} dir={isRtl ? "rtl" : "ltr"}>
       <div
         className="titlebar"
-        data-tauri-drag-region
-        onMouseDown={handleTitlebarMouseDown}
+        onPointerDownCapture={handleTitlebarPointerDown}
         onDoubleClick={(event) => {
           if ((event.target as HTMLElement).closest(".titlebar-controls")) return;
           void appWindow.toggleMaximize();
         }}
       >
-        <div className="titlebar-left" data-tauri-drag-region>
+        <div className="titlebar-left">
           <OctopusMascot size={26} state={streamState === "streaming" ? "thinking" : "idle"} />
           <span className="app-name">Waey</span>
           <span className="app-tagline">Screen-aware AI</span>

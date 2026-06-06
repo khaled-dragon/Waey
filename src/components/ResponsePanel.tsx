@@ -17,6 +17,7 @@ export function ResponsePanel({ capture, errorMessage, messages, streamState, is
   const shouldStickToBottomRef = useRef(true);
   const lastAssistantMessage = messages.slice().reverse().find((m: ChatMessage) => m.role === "assistant") ?? null;
   const isStreamingWithContent = streamState === "streaming" && lastAssistantMessage !== null && lastAssistantMessage.content.trim().length > 0;
+  const isStreamingWithoutContent = streamState === "streaming" && lastAssistantMessage !== null && lastAssistantMessage.content.trim().length === 0;
 
   useEffect(() => {
     if (shouldStickToBottomRef.current) {
@@ -66,13 +67,27 @@ export function ResponsePanel({ capture, errorMessage, messages, streamState, is
           {messages.map((message) => (
             <div key={message.id} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
               <div className="message-role">{message.role === "user" ? (isRtl ? "أنت" : "You") : "Waey"}</div>
-              <div className="message-bubble">{message.content || (streamState === "streaming" && message.role === "assistant" ? "..." : "")}</div>
+              {streamState === "streaming" && message.role === "assistant" && !message.content.trim() ? (
+                <div className="thinking-indicator" role="status" aria-live="polite">
+                  <div className="thinking-track">
+                    <div className="thinking-gradient" />
+                  </div>
+                  <span>{isRtl ? "Waey يفكر..." : "Waey is thinking..."}</span>
+                </div>
+              ) : (
+                <div className="message-bubble">{message.content}</div>
+              )}
             </div>
           ))}
-          {streamState === "streaming" && !isStreamingWithContent && (
+          {streamState === "streaming" && !isStreamingWithContent && !isStreamingWithoutContent && (
             <div className="message message--assistant">
               <div className="message-role">Waey</div>
-              <div className="message-bubble" style={{color:"var(--text-muted)"}}>...</div>
+              <div className="thinking-indicator" role="status" aria-live="polite">
+                <div className="thinking-track">
+                  <div className="thinking-gradient" />
+                </div>
+                <span>{isRtl ? "Waey يفكر..." : "Waey is thinking..."}</span>
+              </div>
             </div>
           )}
           <div ref={bottomRef} />

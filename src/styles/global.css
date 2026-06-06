@@ -45,6 +45,8 @@ body {
   --accent: #ef3f42;
   --accent-hover: #c22b31;
   --accent-coral: #ec8376;
+  --accent-maroon: #6d0b22;
+  --waey-gradient: linear-gradient(90deg, #6d0b22 0%, #c22b31 34%, #ef3f42 66%, #ec8376 100%);
   --nav-active-bg: rgba(239,63,66,0.15);
   --btn-bg: rgba(255,255,255,0.04);
   --btn-border: rgba(255,255,255,0.1);
@@ -75,6 +77,8 @@ body {
   --accent: #c22b31;
   --accent-hover: #9e1f24;
   --accent-coral: #c22b31;
+  --accent-maroon: #6d0b22;
+  --waey-gradient: linear-gradient(90deg, #6d0b22 0%, #c22b31 34%, #ef3f42 66%, #ec8376 100%);
   --nav-active-bg: rgba(194,43,49,0.1);
   --btn-bg: rgba(0,0,0,0.04);
   --btn-border: rgba(0,0,0,0.12);
@@ -306,6 +310,56 @@ body {
 }
 [dir="rtl"] .message--user .message-bubble { border-bottom-right-radius: 9px; border-bottom-left-radius: 2px; }
 [dir="rtl"] .message--assistant .message-bubble { border-bottom-left-radius: 9px; border-bottom-right-radius: 2px; }
+
+.thinking-indicator {
+  width: min(360px, 88%);
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--bg-msg-ai);
+  border: 1px solid var(--border-msg-ai);
+  color: var(--accent-coral);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom-left-radius: 2px;
+}
+
+.thinking-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  min-width: 140px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(109,11,34,0.16);
+}
+
+.thinking-gradient {
+  position: absolute;
+  inset: 0;
+  width: 180%;
+  background: var(--waey-gradient);
+  animation: waeyThinkingSweep 1.2s ease-in-out infinite;
+}
+
+.thinking-indicator span {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-coral);
+  white-space: nowrap;
+}
+
+[dir="rtl"] .thinking-indicator {
+  border-bottom-left-radius: 9px;
+  border-bottom-right-radius: 2px;
+}
+
+@keyframes waeyThinkingSweep {
+  0% { transform: translateX(-45%); opacity: 0.72; }
+  50% { opacity: 1; }
+  100% { transform: translateX(10%); opacity: 0.72; }
+}
 
 .error-msg {
   background: rgba(239,63,66,0.08);
