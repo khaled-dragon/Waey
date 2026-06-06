@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { OctopusMascot } from "./components/OctopusMascot";
 import { ChatComposer } from "./components/ChatComposer";
@@ -86,11 +86,19 @@ function MainOverlay() {
   }
   const appWindow = getCurrentWindow();
 
+  function handleTitlebarMouseDown(event: MouseEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest(".titlebar-controls")) return;
+
+    void appWindow.startDragging();
+  }
+
   return (
     <div className={`app-shell ${isDark ? "theme-dark" : "theme-light"}`} dir={isRtl ? "rtl" : "ltr"}>
       <div
         className="titlebar"
         data-tauri-drag-region
+        onMouseDown={handleTitlebarMouseDown}
         onDoubleClick={(event) => {
           if ((event.target as HTMLElement).closest(".titlebar-controls")) return;
           void appWindow.toggleMaximize();

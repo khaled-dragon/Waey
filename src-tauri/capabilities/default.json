@@ -5,6 +5,7 @@
   "windows": ["main", "region-selector"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "opener:default"
   ]
 }
