@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LlmProvider, ProviderDraft } from "../../shared/types";
 
+export function bootstrapManagedProvider() {
+  return invoke<LlmProvider | null>("bootstrap_managed_provider");
+}
+
 export function listLlmProviders() {
   return invoke<LlmProvider[]>("list_llm_providers");
 }

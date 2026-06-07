@@ -1,4 +1,5 @@
 import { useEffect, useState, type PointerEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { OctopusMascot } from "./components/OctopusMascot";
 import { ChatComposer } from "./components/ChatComposer";
@@ -51,6 +52,28 @@ function MainOverlay() {
       setSelectedPersonaId(savedPersonaId);
     }
   }, [personas, settings.selectedPersonaId, setSelectedPersonaId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let removeListener: (() => void) | null = null;
+
+    void listen("overlay-opened", () => {
+      setActivePanel("chat");
+      startNewConversation();
+    }).then((unlisten) => {
+      if (!isMounted) {
+        unlisten();
+        return;
+      }
+
+      removeListener = unlisten;
+    });
+
+    return () => {
+      isMounted = false;
+      removeListener?.();
+    };
+  }, [startNewConversation]);
 
   function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
   function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
@@ -112,10 +135,7 @@ function MainOverlay() {
           <button className="ctrl-btn ctrl-close" onClick={() => void hideOverlayWindow()} title="Close" type="button">
             <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
-          <button className="ctrl-btn ctrl-min" onClick={() => void appWindow.minimize()} title="Minimize" type="button">
-            <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="2" rx="1" fill="currentColor"/></svg>
-          </button>
-          <button className="ctrl-btn" onClick={() => void appWindow.toggleMaximize()} title="Maximize" type="button">
+          <button className="ctrl-btn" onClick={() => void appWindow.toggleMaximize()} title="Maximize / Restore" type="button">
             <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.4" fill="none"/></svg>
           </button>
         </div>

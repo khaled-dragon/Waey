@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LlmProvider, ProviderDraft } from "../../shared/types";
-import { deleteLlmProvider, listLlmProviders, saveLlmProvider } from "./providerCommands";
+import {
+  bootstrapManagedProvider,
+  deleteLlmProvider,
+  listLlmProviders,
+  saveLlmProvider,
+} from "./providerCommands";
 
 export function useProviders() {
   const [providers, setProviders] = useState<LlmProvider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState<string>("");
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [providerError, setProviderError] = useState<string | null>(null);
+  const [managedProviderChecked, setManagedProviderChecked] = useState(false);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0] ?? null,
@@ -18,6 +24,11 @@ export function useProviders() {
     setProviderError(null);
 
     try {
+      if (!managedProviderChecked) {
+        await bootstrapManagedProvider().catch(() => null);
+        setManagedProviderChecked(true);
+      }
+
       const nextProviders = await listLlmProviders();
 
       setProviders(nextProviders);
@@ -33,7 +44,7 @@ export function useProviders() {
     } finally {
       setIsLoadingProviders(false);
     }
-  }, []);
+  }, [managedProviderChecked]);
 
   const saveProvider = useCallback(
     async (provider: ProviderDraft) => {

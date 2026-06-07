@@ -430,7 +430,12 @@ body {
 .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent-coral); }
 .form-input::placeholder, .form-textarea::placeholder { color: var(--text-placeholder); }
 .form-textarea { resize: none; min-height: 70px; line-height: 1.5; }
-.form-select { cursor: pointer; }
+.form-select { cursor: pointer; color-scheme: dark; }
+.form-select option {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+.theme-light .form-select { color-scheme: light; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 
 .btn-primary {

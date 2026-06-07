@@ -7,6 +7,7 @@ export interface LlmProvider {
   baseUrl: string;
   apiKey: string;
   model: string;
+  managed: boolean;
 }
 
 export interface ProviderDraft {

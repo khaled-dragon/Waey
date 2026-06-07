@@ -81,6 +81,7 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
                 base_url text not null,
                 api_key text not null,
                 model text not null,
+                managed integer not null default 0,
                 created_at integer not null,
                 updated_at integer not null
             );
@@ -118,5 +119,40 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
                 value text not null
             );",
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    ensure_column(
+        connection,
+        "llm_providers",
+        "managed",
+        "alter table llm_providers add column managed integer not null default 0",
+    )?;
+
+    Ok(())
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    alter_statement: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare(&format!("pragma table_info({table_name})"))
+        .map_err(|error| error.to_string())?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    if columns.iter().any(|column| column == column_name) {
+        return Ok(());
+    }
+
+    connection
+        .execute(alter_statement, [])
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
 }

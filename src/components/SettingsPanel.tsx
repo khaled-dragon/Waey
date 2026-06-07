@@ -38,6 +38,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
   const [personaError, setPersonaError] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
   const [savingPersona, setSavingPersona] = useState(false);
+  const visibleProviders = providers.filter((provider) => !provider.managed);
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     void onChangeSettings({ ...settings, [key]: value });
@@ -175,7 +176,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             <button className="btn-primary" disabled={savingProvider} type="submit">{savingProvider ? "..." : (isRtl ? "حفظ المزود" : "Save Provider")}</button>
           </form>
           <div className="item-list">
-            {providers.length === 0 ? <div className="empty-list">{isRtl ? "لا يوجد مزودون بعد" : "No providers yet"}</div> : providers.map((p) => (
+            {visibleProviders.length === 0 ? <div className="empty-list">{isRtl ? "لا يوجد مزودون بعد" : "No providers yet"}</div> : visibleProviders.map((p) => (
               <div key={p.id} className={`list-item ${selectedProviderId===p.id?"list-item--active":""}`}>
                 <button className="list-item-info" onClick={() => handleSelectProvider(p)} type="button">
                   <div className="list-item-name">{p.name}</div>

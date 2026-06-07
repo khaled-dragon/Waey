@@ -14,13 +14,17 @@ use history::{
 };
 use llm::{stream_chat_completion, LlmChatRequest};
 use personas::{delete_persona, list_personas, save_persona, Persona, PersonaDraft};
-use providers::{delete_provider, list_providers, save_provider, LlmProvider, ProviderDraft};
+use providers::{
+    bootstrap_waey_provider, delete_provider, list_providers, save_provider, LlmProvider,
+    ProviderDraft,
+};
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const REGION_WINDOW_LABEL: &str = "region-selector";
+const OVERLAY_OPENED_EVENT: &str = "overlay-opened";
 const CAPTURE_READY_EVENT: &str = "capture-ready";
 const CAPTURE_ERROR_EVENT: &str = "capture-error";
 const TRAY_OPEN_ID: &str = "open-waey";
@@ -101,6 +105,11 @@ fn list_llm_providers(app: AppHandle) -> Result<Vec<LlmProvider>, String> {
 }
 
 #[tauri::command]
+async fn bootstrap_managed_provider(app: AppHandle) -> Result<Option<LlmProvider>, String> {
+    bootstrap_waey_provider(app).await
+}
+
+#[tauri::command]
 fn save_llm_provider(app: AppHandle, provider: ProviderDraft) -> Result<LlmProvider, String> {
     save_provider(&app, provider)
 }
@@ -174,6 +183,9 @@ fn window_by_label(app: &AppHandle, label: &str) -> Result<WebviewWindow, String
 }
 
 fn show_overlay(app: &AppHandle) -> Result<(), String> {
+    app.emit(OVERLAY_OPENED_EVENT, ())
+        .map_err(|error| error.to_string())?;
+
     if !auto_capture_on_overlay(app) {
         logger::info("showing overlay without automatic capture");
         return restore_main_window(app);
@@ -401,6 +413,7 @@ pub fn run() {
             capture_current_screen,
             capture_selected_region,
             cancel_region_selection,
+            bootstrap_managed_provider,
             list_llm_providers,
             save_llm_provider,
             delete_llm_provider,
