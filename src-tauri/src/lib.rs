@@ -213,6 +213,7 @@ fn show_region_selector(app: &AppHandle) -> Result<(), String> {
 
 fn show_window(app: &AppHandle, label: &str) -> Result<(), String> {
     let window = window_by_label(app, label)?;
+    window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.center().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
@@ -393,6 +394,11 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = restore_main_window(app) {
+                logger::error(format!("failed to restore Waey from second instance: {error}"));
+            }
+        }))
         .setup(|app| {
             let log_directory = app
                 .path()
