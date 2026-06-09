@@ -25,14 +25,15 @@ type Panel = "chat" | "history" | "settings";
 
 function MainOverlay() {
   useOverlayShortcuts();
-  const { captureError, latestCapture } = useScreenCaptureEvents();
+  const { captureError, captures, clearCaptures, latestCapture, removeCapture, setCaptureError } = useScreenCaptureEvents();
   const [activePanel, setActivePanel] = useState<Panel>("chat");
+  const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
 
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
   const { deleteProvider, providers, saveProvider, selectedProvider, selectedProviderId, setSelectedProviderId } = useProviders();
   const { deletePersona, personaError, personas, savePersona, selectedPersona, selectedPersonaId, setSelectedPersonaId } = usePersonas();
-  const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, persistMessage, removeConversation, setMessages, startNewConversation } = useConversationHistory();
-  const { errorMessage, streamState, submitPrompt } = useLlmChat({ ensureConversation, messages, persistMessage, setMessages });
+  const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, persistMessage, removeMessage, removeConversation, renameConversation, setMessages, startNewConversation } = useConversationHistory();
+  const { cancelPrompt, editLastUserMessage, errorMessage, streamState, submitPrompt } = useLlmChat({ ensureConversation, messages, persistMessage, removeMessage, setMessages });
 
   const isRtl = settings.language === "ar";
   const isDark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -59,7 +60,7 @@ function MainOverlay() {
 
     void listen("overlay-opened", () => {
       setActivePanel("chat");
-      startNewConversation();
+      clearCaptures();
     }).then((unlisten) => {
       if (!isMounted) {
         unlisten();
@@ -73,10 +74,11 @@ function MainOverlay() {
       isMounted = false;
       removeListener?.();
     };
-  }, [startNewConversation]);
+  }, [clearCaptures]);
 
   function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
   function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
+  function renameSavedConversation(id: string, title: string) { return renameConversation(id, title); }
   function selectProvider(id: string) {
     setSelectedProviderId(id);
     void updateSettings({ ...settings, selectedProviderId: id });
@@ -107,6 +109,21 @@ function MainOverlay() {
       void updateSettings({ ...settings, selectedPersonaId: "" });
     }
   }
+
+  async function attachScreenCapture() {
+    if (captures.length >= 3) {
+      const message = isRtl ? "الحد الأقصى 3 صور" : "Maximum 3 screenshots";
+
+      setCaptureLimitMessage(message);
+      setTimeout(() => setCaptureLimitMessage(null), 1800);
+      return;
+    }
+
+    setCaptureLimitMessage(null);
+    setCaptureError(null);
+    await captureCurrentScreen().catch(() => undefined);
+  }
+
   const appWindow = getCurrentWindow();
 
   function handleTitlebarPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -142,13 +159,15 @@ function MainOverlay() {
       </div>
 
       <div className="toolbar">
-        <button className="screenshot-btn" onClick={() => void captureCurrentScreen().catch(() => undefined)} type="button">
+        <button className="screenshot-btn" onClick={() => void attachScreenCapture()} type="button">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          {isRtl ? "إرفاق لقطة شاشة" : "Attach Screenshot"}
+          <span>{captures.length > 0 ? (isRtl ? "إضافة لقطة شاشة" : "Add Screenshot") : (isRtl ? "إرفاق لقطة شاشة" : "Attach Screenshot")}</span>
+          <span className="screenshot-count">{captures.length}/3</span>
         </button>
+        {captureLimitMessage && <div className="capture-toast">{captureLimitMessage}</div>}
       </div>
 
       <div className="app-body">
@@ -171,6 +190,7 @@ function MainOverlay() {
               conversations={conversations}
               onDeleteConversation={removeConversation}
               onOpenConversation={openConversation}
+              onRenameConversation={renameSavedConversation}
               onStartNewConversation={startFreshConversation}
               isRtl={isRtl}
             />
@@ -196,19 +216,30 @@ function MainOverlay() {
             <div className="chat-layout">
               <ResponsePanel
                 capture={latestCapture}
+                captures={captures}
                 errorMessage={errorMessage ?? captureError ?? historyError ?? personaError}
                 messages={messages}
+                onEditLastUserMessage={(messageId, prompt) => {
+                  if (!selectedProvider) {
+                    setActivePanel("settings");
+                    return Promise.resolve();
+                  }
+
+                  return editLastUserMessage(messageId, prompt, selectedProvider, selectedPersona);
+                }}
+                onRemoveCapture={removeCapture}
                 streamState={streamState}
                 isRtl={isRtl}
               />
               <ChatComposer
+                onCancelPrompt={cancelPrompt}
                 onSubmitPrompt={(prompt) => {
                   if (!selectedProvider) {
                     setActivePanel("settings");
                     return Promise.resolve();
                   }
                   setActivePanel("chat");
-                  return submitPrompt(prompt, selectedProvider, latestCapture, selectedPersona);
+                  return submitPrompt(prompt, selectedProvider, captures, selectedPersona);
                 }}
                 streamState={streamState}
                 isRtl={isRtl}

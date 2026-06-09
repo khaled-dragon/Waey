@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import type { ChatMessage, Conversation } from "../../shared/types";
 import {
   createChatConversation,
+  deleteChatMessage,
   deleteChatConversation,
   listChatConversations,
   listChatMessages,
+  renameChatConversation,
   saveChatMessage,
 } from "./historyCommands";
 
@@ -67,6 +69,7 @@ export function useConversationHistory() {
         role: message.role,
         content: message.content,
         capturePath: message.capturePath ?? null,
+        capturePaths: message.capturePaths ?? [],
       });
 
       await refreshConversations();
@@ -89,6 +92,16 @@ export function useConversationHistory() {
     [activeConversationId, refreshConversations, startNewConversation],
   );
 
+  const renameConversation = useCallback(
+    async (conversationId: string, title: string) => {
+      await renameChatConversation({ conversationId, title });
+      await refreshConversations();
+    },
+    [refreshConversations],
+  );
+
+  const removeMessage = useCallback((messageId: string) => deleteChatMessage(messageId), []);
+
   useEffect(() => {
     void refreshConversations();
   }, [refreshConversations]);
@@ -101,7 +114,9 @@ export function useConversationHistory() {
     loadConversation,
     messages,
     persistMessage,
+    removeMessage,
     removeConversation,
+    renameConversation,
     setMessages,
     startNewConversation,
   };

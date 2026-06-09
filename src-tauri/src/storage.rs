@@ -99,6 +99,7 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
                 role text not null,
                 content text not null,
                 capture_path text,
+                capture_paths text,
                 created_at integer not null,
                 foreign key(conversation_id) references conversations(id) on delete cascade
             );
@@ -126,6 +127,12 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
         "llm_providers",
         "managed",
         "alter table llm_providers add column managed integer not null default 0",
+    )?;
+    ensure_column(
+        connection,
+        "chat_messages",
+        "capture_paths",
+        "alter table chat_messages add column capture_paths text",
     )?;
 
     Ok(())

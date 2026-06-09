@@ -9,10 +9,11 @@ mod storage;
 
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
 use history::{
-    create_conversation, delete_conversation, list_conversations, list_messages, save_message,
-    ChatMessage, ChatMessageDraft, Conversation, ConversationDraft,
+    create_conversation, delete_conversation, delete_message, list_conversations, list_messages,
+    rename_conversation, save_message, ChatMessage, ChatMessageDraft, Conversation,
+    ConversationDraft, ConversationRenameDraft,
 };
-use llm::{stream_chat_completion, LlmChatRequest};
+use llm::{cancel_chat_completion, stream_chat_completion, LlmChatRequest, LlmRequestRegistry};
 use personas::{delete_persona, list_personas, save_persona, Persona, PersonaDraft};
 use providers::{
     bootstrap_waey_provider, delete_provider, list_providers, save_provider, LlmProvider,
@@ -125,6 +126,11 @@ async fn send_llm_prompt(app: AppHandle, request: LlmChatRequest) -> Result<(), 
 }
 
 #[tauri::command]
+fn cancel_llm_prompt(app: AppHandle, request_id: String) -> Result<(), String> {
+    cancel_chat_completion(&app, request_id)
+}
+
+#[tauri::command]
 fn list_chat_conversations(app: AppHandle) -> Result<Vec<Conversation>, String> {
     list_conversations(&app)
 }
@@ -138,6 +144,14 @@ fn create_chat_conversation(
 }
 
 #[tauri::command]
+fn rename_chat_conversation(
+    app: AppHandle,
+    draft: ConversationRenameDraft,
+) -> Result<Conversation, String> {
+    rename_conversation(&app, draft)
+}
+
+#[tauri::command]
 fn list_chat_messages(app: AppHandle, conversation_id: String) -> Result<Vec<ChatMessage>, String> {
     list_messages(&app, conversation_id)
 }
@@ -145,6 +159,11 @@ fn list_chat_messages(app: AppHandle, conversation_id: String) -> Result<Vec<Cha
 #[tauri::command]
 fn save_chat_message(app: AppHandle, message: ChatMessageDraft) -> Result<ChatMessage, String> {
     save_message(&app, message)
+}
+
+#[tauri::command]
+fn delete_chat_message(app: AppHandle, message_id: String) -> Result<(), String> {
+    delete_message(&app, message_id)
 }
 
 #[tauri::command]
@@ -393,6 +412,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(LlmRequestRegistry::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Err(error) = restore_main_window(app) {
@@ -424,10 +444,13 @@ pub fn run() {
             save_llm_provider,
             delete_llm_provider,
             send_llm_prompt,
+            cancel_llm_prompt,
             list_chat_conversations,
             create_chat_conversation,
+            rename_chat_conversation,
             list_chat_messages,
             save_chat_message,
+            delete_chat_message,
             delete_chat_conversation,
             list_prompt_personas,
             save_prompt_persona,

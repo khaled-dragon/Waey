@@ -3,12 +3,17 @@ use base64::{engine::general_purpose, Engine};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{fs, path::Path};
-use tauri::{AppHandle, Emitter};
+use std::{collections::HashSet, fs, path::Path, sync::Mutex};
+use tauri::{AppHandle, Emitter, Manager};
 
 const STREAM_TOKEN_EVENT: &str = "llm-stream-token";
 const STREAM_DONE_EVENT: &str = "llm-stream-done";
 const STREAM_ERROR_EVENT: &str = "llm-stream-error";
+
+#[derive(Default)]
+pub struct LlmRequestRegistry {
+    cancelled_request_ids: Mutex<HashSet<String>>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +23,7 @@ pub struct LlmChatRequest {
     pub prompt: String,
     pub persona_prompt: Option<String>,
     pub capture_path: Option<String>,
+    pub capture_paths: Option<Vec<String>>,
     pub history_messages: Vec<LlmHistoryMessage>,
 }
 
@@ -56,35 +62,48 @@ struct StreamError {
     message: String,
 }
 
+enum StreamCompletion {
+    Done,
+    Cancelled,
+}
+
+pub fn cancel_chat_completion(app: &AppHandle, request_id: String) -> Result<(), String> {
+    request_registry(app).cancel(request_id)
+}
+
 pub async fn stream_chat_completion(app: AppHandle, request: LlmChatRequest) -> Result<(), String> {
+    request_registry(&app).clear_cancelled(&request.request_id)?;
     let result = stream_openai_compatible_response(&app, &request).await;
 
-    if let Err(message) = result {
-        app.emit(
-            STREAM_ERROR_EVENT,
-            StreamError {
-                request_id: request.request_id,
-                message: message.clone(),
-            },
-        )
-        .map_err(|error| error.to_string())?;
+    match result {
+        Ok(StreamCompletion::Done) => app
+            .emit(
+                STREAM_DONE_EVENT,
+                StreamStatus {
+                    request_id: request.request_id,
+                },
+            )
+            .map_err(|error| error.to_string()),
+        Ok(StreamCompletion::Cancelled) => Ok(()),
+        Err(message) => {
+            app.emit(
+                STREAM_ERROR_EVENT,
+                StreamError {
+                    request_id: request.request_id,
+                    message: message.clone(),
+                },
+            )
+            .map_err(|error| error.to_string())?;
 
-        return Err(message);
+            Err(message)
+        }
     }
-
-    app.emit(
-        STREAM_DONE_EVENT,
-        StreamStatus {
-            request_id: request.request_id,
-        },
-    )
-    .map_err(|error| error.to_string())
 }
 
 async fn stream_openai_compatible_response(
     app: &AppHandle,
     request: &LlmChatRequest,
-) -> Result<(), String> {
+) -> Result<StreamCompletion, String> {
     let client = reqwest::Client::new();
     let endpoint = chat_completions_endpoint(&request.provider.base_url);
     let response = client
@@ -102,10 +121,16 @@ async fn stream_openai_compatible_response(
         return Err(format!("Provider returned {status}: {body}"));
     }
 
+    let registry = request_registry(app);
     let mut pending_chunk = String::new();
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
+        if registry.is_cancelled(&request.request_id)? {
+            registry.clear_cancelled(&request.request_id)?;
+            return Ok(StreamCompletion::Cancelled);
+        }
+
         pending_chunk.push_str(
             std::str::from_utf8(&chunk.map_err(|error| error.to_string())?)
                 .map_err(|error| error.to_string())?,
@@ -118,7 +143,37 @@ async fn stream_openai_compatible_response(
         }
     }
 
-    Ok(())
+    Ok(StreamCompletion::Done)
+}
+
+fn request_registry(app: &AppHandle) -> tauri::State<'_, LlmRequestRegistry> {
+    app.state::<LlmRequestRegistry>()
+}
+
+impl LlmRequestRegistry {
+    fn cancel(&self, request_id: String) -> Result<(), String> {
+        self.cancelled_request_ids
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(request_id);
+        Ok(())
+    }
+
+    fn is_cancelled(&self, request_id: &str) -> Result<bool, String> {
+        Ok(self
+            .cancelled_request_ids
+            .lock()
+            .map_err(|error| error.to_string())?
+            .contains(request_id))
+    }
+
+    fn clear_cancelled(&self, request_id: &str) -> Result<(), String> {
+        self.cancelled_request_ids
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(request_id);
+        Ok(())
+    }
 }
 
 fn request_headers(provider: &LlmProvider) -> Result<reqwest::header::HeaderMap, String> {
@@ -198,22 +253,49 @@ fn history_messages(request: &LlmChatRequest) -> Vec<Value> {
 }
 
 fn user_message_content(request: &LlmChatRequest) -> Result<Value, String> {
-    let Some(capture_path) = &request.capture_path else {
+    let capture_paths = normalized_capture_paths(request);
+
+    if capture_paths.is_empty() {
         return Ok(json!(request.prompt));
     };
 
-    Ok(json!([
-        {
-            "type": "text",
-            "text": request.prompt
-        },
-        {
+    let mut content = vec![json!({
+        "type": "text",
+        "text": request.prompt
+    })];
+
+    for capture_path in capture_paths {
+        content.push(json!({
             "type": "image_url",
             "image_url": {
                 "url": image_data_url(capture_path)?
             }
+        }));
+    }
+
+    Ok(json!(content))
+}
+
+fn normalized_capture_paths(request: &LlmChatRequest) -> Vec<&str> {
+    let mut paths = request
+        .capture_paths
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|path| path.trim())
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>();
+
+    if paths.is_empty() {
+        if let Some(capture_path) = request.capture_path.as_deref() {
+            if !capture_path.trim().is_empty() {
+                paths.push(capture_path.trim());
+            }
         }
-    ]))
+    }
+
+    paths.truncate(3);
+    paths
 }
 
 fn image_data_url(path: &str) -> Result<String, String> {

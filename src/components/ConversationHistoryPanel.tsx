@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Conversation } from "../shared/types";
 
 interface ConversationHistoryPanelProps {
@@ -5,11 +6,30 @@ interface ConversationHistoryPanelProps {
   conversations: Conversation[];
   onDeleteConversation: (conversationId: string) => Promise<void>;
   onOpenConversation: (conversationId: string) => void;
+  onRenameConversation: (conversationId: string, title: string) => Promise<void>;
   onStartNewConversation: () => void;
   isRtl: boolean;
 }
 
-export function ConversationHistoryPanel({ activeConversationId, conversations, onDeleteConversation, onOpenConversation, onStartNewConversation, isRtl }: ConversationHistoryPanelProps) {
+export function ConversationHistoryPanel({ activeConversationId, conversations, onDeleteConversation, onOpenConversation, onRenameConversation, onStartNewConversation, isRtl }: ConversationHistoryPanelProps) {
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+
+  function startRename(conversation: Conversation) {
+    setEditingConversationId(conversation.id);
+    setDraftTitle(conversation.title);
+  }
+
+  async function submitRename(conversationId: string) {
+    if (!draftTitle.trim()) {
+      return;
+    }
+
+    await onRenameConversation(conversationId, draftTitle);
+    setEditingConversationId(null);
+    setDraftTitle("");
+  }
+
   return (
     <div className="panel">
       <div className="panel-header" style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
@@ -28,12 +48,38 @@ export function ConversationHistoryPanel({ activeConversationId, conversations, 
         ) : (
           conversations.map((conv) => (
             <div key={conv.id} className={`list-item ${activeConversationId === conv.id ? "list-item--active" : ""}`}>
-              <button className="list-item-info" onClick={() => onOpenConversation(conv.id)} type="button">
-                <div className="list-item-name">{conv.title}</div>
-                <div className="list-item-sub">{formatDate(conv.updatedAt)}</div>
-              </button>
+              {editingConversationId === conv.id ? (
+                <form className="rename-form" onSubmit={(event) => { event.preventDefault(); void submitRename(conv.id); }}>
+                  <input
+                    autoFocus
+                    className="rename-input"
+                    onChange={(event) => setDraftTitle(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setEditingConversationId(null);
+                        setDraftTitle("");
+                      }
+                    }}
+                    value={draftTitle}
+                  />
+                </form>
+              ) : (
+                <button className="list-item-info" onClick={() => onOpenConversation(conv.id)} type="button">
+                  <div className="list-item-name">{conv.title}</div>
+                  <div className="list-item-sub">{formatDate(conv.updatedAt)}</div>
+                </button>
+              )}
               <div className="list-item-actions">
                 {activeConversationId === conv.id && <span className="badge-active">{isRtl ? "مفتوح" : "Open"}</span>}
+                {editingConversationId === conv.id ? (
+                  <button className="btn-secondary" onClick={() => void submitRename(conv.id)} type="button">
+                    {isRtl ? "حفظ" : "Save"}
+                  </button>
+                ) : (
+                  <button className="btn-secondary" onClick={() => startRename(conv)} type="button">
+                    {isRtl ? "تعديل" : "Rename"}
+                  </button>
+                )}
                 <button className="btn-secondary" onClick={() => void onDeleteConversation(conv.id)} type="button">
                   {isRtl ? "حذف" : "Delete"}
                 </button>

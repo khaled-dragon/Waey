@@ -1,12 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { ChatMessage, LlmProvider, Persona, ScreenCapture, StreamState } from "../../shared/types";
-import { sendLlmPrompt } from "./chatCommands";
+import { cancelLlmPrompt, sendLlmPrompt } from "./chatCommands";
 
 interface UseLlmChatOptions {
   ensureConversation: (titleSeed: string) => Promise<string>;
   messages: ChatMessage[];
   persistMessage: (message: ChatMessage, conversationId: string) => Promise<ChatMessage>;
+  removeMessage: (messageId: string) => Promise<void>;
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
 }
 
@@ -28,12 +29,14 @@ export function useLlmChat({
   ensureConversation,
   messages,
   persistMessage,
+  removeMessage,
   setMessages,
 }: UseLlmChatOptions) {
   const activeRequestId = useRef<string | null>(null);
   const assistantMessageByRequest = useRef<Map<string, ChatMessage>>(new Map());
   const conversationByRequest = useRef<Map<string, string>>(new Map());
   const contentByRequest = useRef<Map<string, string>>(new Map());
+  const [activeStreamingRequestId, setActiveStreamingRequestId] = useState<string | null>(null);
   const [streamState, setStreamState] = useState<StreamState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -41,7 +44,7 @@ export function useLlmChat({
     async (
       prompt: string,
       provider: LlmProvider | null,
-      capture: ScreenCapture | null,
+      captures: ScreenCapture[],
       persona: Persona | null,
     ) => {
       const trimmedPrompt = prompt.trim();
@@ -58,11 +61,13 @@ export function useLlmChat({
       const conversationId = await ensureConversation(trimmedPrompt);
       const requestId = crypto.randomUUID();
       const createdAt = Math.floor(Date.now() / 1000);
+      const capturePaths = captures.map((capture) => capture.path).slice(0, 3);
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
         content: trimmedPrompt,
-        capturePath: capture?.path ?? null,
+        capturePath: capturePaths[0] ?? null,
+        capturePaths,
         createdAt,
       };
       const assistantMessage: ChatMessage = {
@@ -77,6 +82,7 @@ export function useLlmChat({
       assistantMessageByRequest.current.set(requestId, assistantMessage);
       conversationByRequest.current.set(requestId, conversationId);
       contentByRequest.current.set(requestId, "");
+      setActiveStreamingRequestId(requestId);
       setStreamState("streaming");
       setErrorMessage(null);
       setMessages((currentMessages) => [...currentMessages, userMessage, assistantMessage]);
@@ -86,18 +92,150 @@ export function useLlmChat({
         await sendLlmPrompt({
           provider,
           prompt: trimmedPrompt,
-          capture,
+          capture: captures[0] ?? null,
+          captures,
           persona,
           requestId,
           historyMessages,
         });
       } catch (error) {
+        if (activeRequestId.current !== requestId) {
+          return;
+        }
+
         setErrorMessage(error instanceof Error ? error.message : String(error));
         setStreamState("error");
       }
     },
     [ensureConversation, messages, persistMessage, setMessages],
   );
+
+  const editLastUserMessage = useCallback(
+    async (
+      messageId: string,
+      prompt: string,
+      provider: LlmProvider | null,
+      persona: Persona | null,
+    ) => {
+      const trimmedPrompt = prompt.trim();
+
+      if (streamState === "streaming" || !trimmedPrompt) {
+        return;
+      }
+
+      if (!provider) {
+        setErrorMessage("Add and select an API provider first.");
+        return;
+      }
+
+      const userMessageIndex = messages.findIndex((message) => message.id === messageId);
+      let lastUserMessageIndex = -1;
+
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index]?.role === "user") {
+          lastUserMessageIndex = index;
+          break;
+        }
+      }
+
+      const userMessage = messages[userMessageIndex];
+
+      if (!userMessage || userMessage.role !== "user" || userMessageIndex !== lastUserMessageIndex) {
+        setErrorMessage("Only the latest sent message can be edited.");
+        return;
+      }
+
+      const conversationId = userMessage.conversationId ?? await ensureConversation(trimmedPrompt);
+      const oldAssistantMessage = messages[userMessageIndex + 1]?.role === "assistant"
+        ? messages[userMessageIndex + 1]
+        : null;
+      const requestId = crypto.randomUUID();
+      const editedUserMessage: ChatMessage = {
+        ...userMessage,
+        content: trimmedPrompt,
+        conversationId,
+      };
+      const assistantMessage: ChatMessage = {
+        id: requestId,
+        role: "assistant",
+        content: "",
+        conversationId,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      const historyMessages = messages
+        .slice(0, userMessageIndex)
+        .filter((message) => message.content.trim())
+        .slice(-12);
+
+      activeRequestId.current = requestId;
+      assistantMessageByRequest.current.set(requestId, assistantMessage);
+      conversationByRequest.current.set(requestId, conversationId);
+      contentByRequest.current.set(requestId, "");
+      setActiveStreamingRequestId(requestId);
+      setStreamState("streaming");
+      setErrorMessage(null);
+      setMessages((currentMessages) => {
+        const nextMessages = [...currentMessages];
+        const currentUserIndex = nextMessages.findIndex((message) => message.id === messageId);
+
+        if (currentUserIndex === -1) {
+          return currentMessages;
+        }
+
+        nextMessages[currentUserIndex] = editedUserMessage;
+
+        if (oldAssistantMessage) {
+          return nextMessages.map((message) =>
+            message.id === oldAssistantMessage.id ? assistantMessage : message,
+          );
+        }
+
+        nextMessages.splice(currentUserIndex + 1, 0, assistantMessage);
+        return nextMessages;
+      });
+
+      try {
+        await persistMessage(editedUserMessage, conversationId);
+
+        if (oldAssistantMessage) {
+          await removeMessage(oldAssistantMessage.id);
+        }
+
+        await sendLlmPrompt({
+          provider,
+          prompt: trimmedPrompt,
+          capture: null,
+          capturePath: editedUserMessage.capturePath ?? null,
+          capturePaths: editedUserMessage.capturePaths ?? [],
+          persona,
+          requestId,
+          historyMessages,
+        });
+      } catch (error) {
+        if (activeRequestId.current !== requestId) {
+          return;
+        }
+
+        setErrorMessage(error instanceof Error ? error.message : String(error));
+        setStreamState("error");
+      }
+    },
+    [ensureConversation, messages, persistMessage, removeMessage, setMessages, streamState],
+  );
+
+  const cancelPrompt = useCallback(async () => {
+    const requestId = activeRequestId.current;
+
+    if (!requestId) {
+      return;
+    }
+
+    await cancelLlmPrompt(requestId).catch(() => undefined);
+    setMessages((currentMessages) => currentMessages.filter((message) => message.id !== requestId));
+    cleanupRequest(requestId);
+    setErrorMessage(null);
+    setStreamState("idle");
+  }, [setMessages]);
 
   useEffect(() => {
     const pendingListeners = [
@@ -154,12 +292,16 @@ export function useLlmChat({
 
   function cleanupRequest(requestId: string) {
     activeRequestId.current = null;
+    setActiveStreamingRequestId(null);
     assistantMessageByRequest.current.delete(requestId);
     conversationByRequest.current.delete(requestId);
     contentByRequest.current.delete(requestId);
   }
 
   return {
+    activeStreamingRequestId,
+    cancelPrompt,
+    editLastUserMessage,
     errorMessage,
     streamState,
     submitPrompt,

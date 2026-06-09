@@ -83,15 +83,22 @@ export interface ChatMessage {
   content: string;
   conversationId?: string;
   capturePath?: string | null;
+  capturePaths?: string[];
   createdAt: number;
 }
 
 export interface PersistedChatMessage extends ChatMessage {
   conversationId: string;
   capturePath: string | null;
+  capturePaths: string[];
 }
 
 export interface ConversationDraft {
+  title: string;
+}
+
+export interface ConversationRenameDraft {
+  conversationId: string;
   title: string;
 }
 
@@ -101,6 +108,7 @@ export interface ChatMessageDraft {
   role: ChatMessageRole;
   content: string;
   capturePath?: string | null;
+  capturePaths?: string[];
 }
 
 export type StreamState = "idle" | "streaming" | "error";
