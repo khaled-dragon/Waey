@@ -28,6 +28,7 @@ function MainOverlay() {
   const { captureError, captures, clearCaptures, latestCapture, removeCapture, setCaptureError } = useScreenCaptureEvents();
   const [activePanel, setActivePanel] = useState<Panel>("chat");
   const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
+  const [showClosePrompt, setShowClosePrompt] = useState(false);
 
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
   const { deleteProvider, providers, saveProvider, selectedProvider, selectedProviderId, setSelectedProviderId } = useProviders();
@@ -79,6 +80,7 @@ function MainOverlay() {
   function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
   function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
   function renameSavedConversation(id: string, title: string) { return renameConversation(id, title); }
+  function hasActiveConversation() { return activeConversationId !== null || messages.length > 0; }
   function selectProvider(id: string) {
     setSelectedProviderId(id);
     void updateSettings({ ...settings, selectedProviderId: id });
@@ -133,6 +135,27 @@ function MainOverlay() {
     void appWindow.startDragging();
   }
 
+  function requestCloseOverlay() {
+    if (hasActiveConversation()) {
+      setShowClosePrompt(true);
+      return;
+    }
+
+    void hideOverlayWindow();
+  }
+
+  function keepChatAndClose() {
+    setShowClosePrompt(false);
+    void hideOverlayWindow();
+  }
+
+  function endChatAndClose() {
+    setShowClosePrompt(false);
+    startNewConversation();
+    clearCaptures();
+    void hideOverlayWindow();
+  }
+
   return (
     <div className={`app-shell ${isDark ? "theme-dark" : "theme-light"}`} dir={isRtl ? "rtl" : "ltr"}>
       <div
@@ -149,7 +172,7 @@ function MainOverlay() {
           <span className="app-tagline">Screen-aware AI</span>
         </div>
         <div className="titlebar-controls">
-          <button className="ctrl-btn ctrl-close" onClick={() => void hideOverlayWindow()} title="Close" type="button">
+          <button className="ctrl-btn ctrl-close" onClick={requestCloseOverlay} title="Close" type="button">
             <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
           <button className="ctrl-btn" onClick={() => void appWindow.toggleMaximize()} title="Maximize / Restore" type="button">
@@ -248,6 +271,29 @@ function MainOverlay() {
           )}
         </main>
       </div>
+      {showClosePrompt && (
+        <div className="close-chat-backdrop" role="presentation">
+          <div className="close-chat-dialog" role="dialog" aria-modal="true" aria-labelledby="close-chat-title">
+            <div className="close-chat-title" id="close-chat-title">
+              {isRtl ? "إغلاق Waey؟" : "Close Waey?"}
+            </div>
+            <div className="close-chat-copy">
+              {isRtl ? "هل تريد الرجوع لنفس الشات لاحقاً أم تبدأ شات جديد عند الفتح القادم؟" : "Keep this chat for next time, or end it and start fresh when Waey opens again?"}
+            </div>
+            <div className="close-chat-actions">
+              <button className="btn-secondary" onClick={() => setShowClosePrompt(false)} type="button">
+                {isRtl ? "إلغاء" : "Cancel"}
+              </button>
+              <button className="btn-secondary" onClick={endChatAndClose} type="button">
+                {isRtl ? "إنهاء الشات" : "End Chat"}
+              </button>
+              <button className="btn-primary" onClick={keepChatAndClose} type="button">
+                {isRtl ? "البقاء في الشات" : "Keep Chat"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
