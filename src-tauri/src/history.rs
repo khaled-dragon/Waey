@@ -80,8 +80,9 @@ pub fn list_conversations(app: &AppHandle) -> Result<Vec<Conversation>, String> 
             Ok(Conversation {
                 id: row.get(0)?,
                 title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
+                pinned: row.get::<_, i64>(2)? == 1,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         })
         .map_err(|error| error.to_string())?
