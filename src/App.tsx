@@ -33,7 +33,7 @@ function MainOverlay() {
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
   const { deleteProvider, providers, saveProvider, selectedProvider, selectedProviderId, setSelectedProviderId } = useProviders();
   const { deletePersona, personaError, personas, savePersona, selectedPersona, selectedPersonaId, setSelectedPersonaId } = usePersonas();
-  const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, persistMessage, removeMessage, removeConversation, renameConversation, setMessages, startNewConversation } = useConversationHistory();
+  const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, pinConversation, persistMessage, removeMessage, removeConversation, renameConversation, setMessages, startNewConversation } = useConversationHistory();
   const { cancelPrompt, editLastUserMessage, errorMessage, streamState, submitPrompt } = useLlmChat({ ensureConversation, messages, persistMessage, removeMessage, setMessages });
 
   const isRtl = settings.language === "ar";
@@ -80,6 +80,7 @@ function MainOverlay() {
   function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
   function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
   function renameSavedConversation(id: string, title: string) { return renameConversation(id, title); }
+  function pinSavedConversation(id: string, pinned: boolean) { return pinConversation(id, pinned); }
   function hasActiveConversation() { return activeConversationId !== null || messages.length > 0; }
   function selectProvider(id: string) {
     setSelectedProviderId(id);
@@ -213,6 +214,7 @@ function MainOverlay() {
               conversations={conversations}
               onDeleteConversation={removeConversation}
               onOpenConversation={openConversation}
+              onPinConversation={pinSavedConversation}
               onRenameConversation={renameSavedConversation}
               onStartNewConversation={startFreshConversation}
               isRtl={isRtl}

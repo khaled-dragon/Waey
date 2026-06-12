@@ -10,8 +10,8 @@ mod storage;
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
 use history::{
     create_conversation, delete_conversation, delete_message, list_conversations, list_messages,
-    rename_conversation, save_message, ChatMessage, ChatMessageDraft, Conversation,
-    ConversationDraft, ConversationRenameDraft,
+    rename_conversation, save_message, set_conversation_pin, ChatMessage, ChatMessageDraft,
+    Conversation, ConversationDraft, ConversationPinDraft, ConversationRenameDraft,
 };
 use llm::{cancel_chat_completion, stream_chat_completion, LlmChatRequest, LlmRequestRegistry};
 use personas::{delete_persona, list_personas, save_persona, Persona, PersonaDraft};
@@ -149,6 +149,14 @@ fn rename_chat_conversation(
     draft: ConversationRenameDraft,
 ) -> Result<Conversation, String> {
     rename_conversation(&app, draft)
+}
+
+#[tauri::command]
+fn pin_chat_conversation(
+    app: AppHandle,
+    draft: ConversationPinDraft,
+) -> Result<Conversation, String> {
+    set_conversation_pin(&app, draft)
 }
 
 #[tauri::command]
@@ -448,6 +456,7 @@ pub fn run() {
             list_chat_conversations,
             create_chat_conversation,
             rename_chat_conversation,
+            pin_chat_conversation,
             list_chat_messages,
             save_chat_message,
             delete_chat_message,

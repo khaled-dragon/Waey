@@ -3,6 +3,7 @@ import type {
   ChatMessageDraft,
   Conversation,
   ConversationDraft,
+  ConversationPinDraft,
   ConversationRenameDraft,
   PersistedChatMessage,
 } from "../../shared/types";
@@ -17,6 +18,10 @@ export function createChatConversation(draft: ConversationDraft) {
 
 export function renameChatConversation(draft: ConversationRenameDraft) {
   return invoke<Conversation>("rename_chat_conversation", { draft });
+}
+
+export function pinChatConversation(draft: ConversationPinDraft) {
+  return invoke<Conversation>("pin_chat_conversation", { draft });
 }
 
 export function listChatMessages(conversationId: string) {

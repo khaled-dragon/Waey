@@ -89,6 +89,7 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
             create table if not exists conversations (
                 id text primary key,
                 title text not null,
+                pinned integer not null default 0,
                 created_at integer not null,
                 updated_at integer not null
             );
@@ -127,6 +128,12 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
         "llm_providers",
         "managed",
         "alter table llm_providers add column managed integer not null default 0",
+    )?;
+    ensure_column(
+        connection,
+        "conversations",
+        "pinned",
+        "alter table conversations add column pinned integer not null default 0",
     )?;
     ensure_column(
         connection,

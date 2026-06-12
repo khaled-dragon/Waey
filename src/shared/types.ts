@@ -36,6 +36,7 @@ export interface PersonaDraft {
 export interface Conversation {
   id: string;
   title: string;
+  pinned: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -46,6 +47,7 @@ export interface AppSettings {
   theme: "system" | "dark" | "light";
   language: "en" | "ar";
   autoCaptureOnOverlay: boolean;
+  launchOnStartup: boolean;
   selectedProviderId?: string;
   selectedPersonaId?: string;
 }
@@ -100,6 +102,11 @@ export interface ConversationDraft {
 export interface ConversationRenameDraft {
   conversationId: string;
   title: string;
+}
+
+export interface ConversationPinDraft {
+  conversationId: string;
+  pinned: boolean;
 }
 
 export interface ChatMessageDraft {

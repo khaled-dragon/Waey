@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub struct Conversation {
     pub id: String,
     pub title: String,
+    pub pinned: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -48,6 +49,13 @@ pub struct ConversationRenameDraft {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConversationPinDraft {
+    pub conversation_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatMessageDraft {
     pub id: Option<String>,
     pub conversation_id: String,
@@ -61,9 +69,9 @@ pub fn list_conversations(app: &AppHandle) -> Result<Vec<Conversation>, String> 
     let connection = open_app_database(app)?;
     let mut statement = connection
         .prepare(
-            "select id, title, created_at, updated_at
+            "select id, title, pinned, created_at, updated_at
              from conversations
-             order by updated_at desc",
+             order by pinned desc, updated_at desc",
         )
         .map_err(|error| error.to_string())?;
 
@@ -90,6 +98,7 @@ pub fn create_conversation(
     let conversation = Conversation {
         id: Uuid::new_v4().to_string(),
         title,
+        pinned: false,
         created_at: timestamp_seconds(),
         updated_at: timestamp_seconds(),
     };
@@ -97,11 +106,12 @@ pub fn create_conversation(
 
     connection
         .execute(
-            "insert into conversations (id, title, created_at, updated_at)
-             values (?1, ?2, ?3, ?4)",
+            "insert into conversations (id, title, pinned, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5)",
             params![
                 &conversation.id,
                 &conversation.title,
+                bool_to_integer(conversation.pinned),
                 conversation.created_at,
                 conversation.updated_at
             ],
@@ -134,7 +144,7 @@ pub fn rename_conversation(
 
     let mut statement = connection
         .prepare(
-            "select id, title, created_at, updated_at
+            "select id, title, pinned, created_at, updated_at
              from conversations
              where id = ?1",
         )
@@ -145,8 +155,54 @@ pub fn rename_conversation(
             Ok(Conversation {
                 id: row.get(0)?,
                 title: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
+                pinned: row.get::<_, i64>(2)? == 1,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())
+}
+
+pub fn set_conversation_pin(
+    app: &AppHandle,
+    draft: ConversationPinDraft,
+) -> Result<Conversation, String> {
+    let updated_at = timestamp_seconds();
+    let connection = open_app_database(app)?;
+
+    let changed_rows = connection
+        .execute(
+            "update conversations
+             set pinned = ?1, updated_at = ?2
+             where id = ?3",
+            params![
+                bool_to_integer(draft.pinned),
+                updated_at,
+                &draft.conversation_id
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    if changed_rows == 0 {
+        return Err("Conversation was not found.".to_string());
+    }
+
+    let mut statement = connection
+        .prepare(
+            "select id, title, pinned, created_at, updated_at
+             from conversations
+             where id = ?1",
+        )
+        .map_err(|error| error.to_string())?;
+
+    statement
+        .query_row(params![draft.conversation_id], |row| {
+            Ok(Conversation {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                pinned: row.get::<_, i64>(2)? == 1,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         })
         .map_err(|error| error.to_string())
@@ -301,6 +357,10 @@ fn parse_capture_paths(value: Option<String>, fallback_capture_path: Option<&str
 
 fn timestamp_seconds() -> i64 {
     chrono_like_timestamp()
+}
+
+fn bool_to_integer(value: bool) -> i64 {
+    if value { 1 } else { 0 }
 }
 
 fn chrono_like_timestamp() -> i64 {

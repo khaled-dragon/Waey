@@ -6,6 +6,7 @@ import {
   deleteChatConversation,
   listChatConversations,
   listChatMessages,
+  pinChatConversation,
   renameChatConversation,
   saveChatMessage,
 } from "./historyCommands";
@@ -100,6 +101,14 @@ export function useConversationHistory() {
     [refreshConversations],
   );
 
+  const pinConversation = useCallback(
+    async (conversationId: string, pinned: boolean) => {
+      await pinChatConversation({ conversationId, pinned });
+      await refreshConversations();
+    },
+    [refreshConversations],
+  );
+
   const removeMessage = useCallback((messageId: string) => deleteChatMessage(messageId), []);
 
   useEffect(() => {
@@ -113,6 +122,7 @@ export function useConversationHistory() {
     historyError,
     loadConversation,
     messages,
+    pinConversation,
     persistMessage,
     removeMessage,
     removeConversation,

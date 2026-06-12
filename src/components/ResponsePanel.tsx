@@ -128,7 +128,9 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
                   </div>
                 </form>
               ) : (
-                <div className="message-bubble">{message.content}</div>
+                <div className="message-bubble">
+                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} /> : message.content}
+                </div>
               )}
             </div>
           ))}
@@ -149,6 +151,90 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
       </div>
     </div>
   );
+}
+
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "code"; content: string; language: string };
+
+interface FormattedAssistantMessageProps {
+  content: string;
+  isRtl: boolean;
+}
+
+function FormattedAssistantMessage({ content, isRtl }: FormattedAssistantMessageProps) {
+  const segments = parseMessageSegments(content);
+
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.type === "code" ? (
+          <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} />
+        ) : (
+          <span key={`${segment.type}-${index}`}>{segment.content}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+interface CodeBlockProps {
+  content: string;
+  isRtl: boolean;
+  language: string;
+}
+
+function CodeBlock({ content, isRtl, language }: CodeBlockProps) {
+  const [copied, setCopied] = useState(false);
+  const label = language || "code";
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="code-block">
+      <div className="code-block-header">
+        <span>{label}</span>
+        <button className="code-copy-btn" onClick={() => void copyCode()} type="button">
+          {copied ? (isRtl ? "تم النسخ" : "Copied") : (isRtl ? "نسخ" : "Copy")}
+        </button>
+      </div>
+      <pre className="code-block-body" dir="ltr"><code>{content}</code></pre>
+    </div>
+  );
+}
+
+function parseMessageSegments(content: string): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  const codeBlockPattern = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockPattern.exec(content)) !== null) {
+    if (match.index > cursor) {
+      segments.push({ type: "text", content: content.slice(cursor, match.index) });
+    }
+
+    segments.push({
+      type: "code",
+      language: match[1]?.trim() ?? "",
+      content: match[2]?.replace(/\n$/, "") ?? "",
+    });
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < content.length) {
+    segments.push({ type: "text", content: content.slice(cursor) });
+  }
+
+  return segments.length > 0 ? segments : [{ type: "text", content }];
 }
 
 interface CapturePreviewItem {

@@ -205,7 +205,7 @@ fn request_headers(provider: &LlmProvider) -> Result<reqwest::header::HeaderMap,
 fn chat_request_body(request: &LlmChatRequest) -> Result<Value, String> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached."
+        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached. Wrap code, terminal commands, and config snippets in fenced Markdown code blocks."
     })];
 
     if let Some(persona_prompt) = persona_system_message(request) {

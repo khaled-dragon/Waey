@@ -6,14 +6,19 @@ interface ConversationHistoryPanelProps {
   conversations: Conversation[];
   onDeleteConversation: (conversationId: string) => Promise<void>;
   onOpenConversation: (conversationId: string) => void;
+  onPinConversation: (conversationId: string, pinned: boolean) => Promise<void>;
   onRenameConversation: (conversationId: string, title: string) => Promise<void>;
   onStartNewConversation: () => void;
   isRtl: boolean;
 }
 
-export function ConversationHistoryPanel({ activeConversationId, conversations, onDeleteConversation, onOpenConversation, onRenameConversation, onStartNewConversation, isRtl }: ConversationHistoryPanelProps) {
+export function ConversationHistoryPanel({ activeConversationId, conversations, onDeleteConversation, onOpenConversation, onPinConversation, onRenameConversation, onStartNewConversation, isRtl }: ConversationHistoryPanelProps) {
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const filteredConversations = conversations.filter((conversation) =>
+    conversation.title.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+  );
 
   function startRename(conversation: Conversation) {
     setEditingConversationId(conversation.id);
@@ -42,11 +47,18 @@ export function ConversationHistoryPanel({ activeConversationId, conversations, 
         </button>
       </div>
 
+      <input
+        className="history-search"
+        onChange={(event) => setSearchQuery(event.currentTarget.value)}
+        placeholder={isRtl ? "ابحث في الشاتات..." : "Search chats..."}
+        value={searchQuery}
+      />
+
       <div className="item-list">
-        {conversations.length === 0 ? (
-          <div className="empty-list">{isRtl ? "لا توجد محادثات بعد" : "No conversations yet"}</div>
+        {filteredConversations.length === 0 ? (
+          <div className="empty-list">{searchQuery.trim() ? (isRtl ? "لا توجد نتائج" : "No matching chats") : (isRtl ? "لا توجد محادثات بعد" : "No conversations yet")}</div>
         ) : (
-          conversations.map((conv) => (
+          filteredConversations.map((conv) => (
             <div key={conv.id} className={`list-item ${activeConversationId === conv.id ? "list-item--active" : ""}`}>
               {editingConversationId === conv.id ? (
                 <form className="rename-form" onSubmit={(event) => { event.preventDefault(); void submitRename(conv.id); }}>
@@ -65,12 +77,18 @@ export function ConversationHistoryPanel({ activeConversationId, conversations, 
                 </form>
               ) : (
                 <button className="list-item-info" onClick={() => onOpenConversation(conv.id)} type="button">
-                  <div className="list-item-name">{conv.title}</div>
+                  <div className="list-item-name">
+                    {conv.pinned && <span className="pin-indicator" title={isRtl ? "مثبت" : "Pinned"}>●</span>}
+                    <span>{conv.title}</span>
+                  </div>
                   <div className="list-item-sub">{formatDate(conv.updatedAt)}</div>
                 </button>
               )}
               <div className="list-item-actions">
                 {activeConversationId === conv.id && <span className="badge-active">{isRtl ? "مفتوح" : "Open"}</span>}
+                <button className={`btn-secondary ${conv.pinned ? "btn-secondary--active" : ""}`} onClick={() => void onPinConversation(conv.id, !conv.pinned)} type="button">
+                  {conv.pinned ? (isRtl ? "إلغاء التثبيت" : "Unpin") : (isRtl ? "تثبيت" : "Pin")}
+                </button>
                 {editingConversationId === conv.id ? (
                   <button className="btn-secondary" onClick={() => void submitRename(conv.id)} type="button">
                     {isRtl ? "حفظ" : "Save"}

@@ -402,6 +402,60 @@ body {
 [dir="rtl"] .message--user .message-bubble { border-bottom-right-radius: 9px; border-bottom-left-radius: 2px; }
 [dir="rtl"] .message--assistant .message-bubble { border-bottom-left-radius: 9px; border-bottom-right-radius: 2px; }
 
+.code-block {
+  margin: 7px 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid rgba(236,131,118,0.18);
+  background: #1f1c1d;
+  color: #f8eeee;
+  direction: ltr;
+}
+
+.code-block:first-child { margin-top: 0; }
+.code-block:last-child { margin-bottom: 0; }
+
+.code-block-header {
+  min-height: 30px;
+  padding: 6px 9px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.68);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.code-copy-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.76);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 2px 4px;
+}
+
+.code-copy-btn:hover { color: #ffffff; }
+
+.code-block-body {
+  margin: 0;
+  padding: 10px;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.55;
+  font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+}
+
+.theme-light .code-block {
+  background: #2a2728;
+  border-color: rgba(194,39,45,0.2);
+  color: #fff7f7;
+}
+
 .message-edit-form {
   width: min(390px, 88%);
   display: flex; flex-direction: column; gap: 6px;
@@ -611,8 +665,27 @@ body {
   font-size: 11px; cursor: pointer; transition: all 0.15s; font-family: inherit;
 }
 .btn-secondary:hover { border-color: var(--accent-coral); color: var(--text-primary); }
+.btn-secondary--active {
+  border-color: rgba(239,63,66,0.28);
+  background: rgba(239,63,66,0.12);
+  color: var(--accent-coral);
+}
 
 .item-list { display: flex; flex-direction: column; gap: 5px; }
+
+.history-search {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  outline: none;
+  font-family: inherit;
+}
+.history-search:focus { border-color: var(--accent-coral); }
+.history-search::placeholder { color: var(--text-placeholder); }
 
 .list-item {
   background: var(--bg-surface); border: 1px solid var(--border-item);
@@ -622,7 +695,8 @@ body {
 .list-item--active { border-color: rgba(239,63,66,0.25); background: rgba(239,63,66,0.06); }
 .list-item-info { flex: 1; min-width: 0; background: none; border: none; cursor: pointer; text-align: left; padding: 0; }
 [dir="rtl"] .list-item-info { text-align: right; }
-.list-item-name { font-size: 12.5px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-item-name { font-size: 12.5px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; }
+.pin-indicator { color: var(--accent-coral); font-size: 9px; flex-shrink: 0; }
 .list-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-item-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
 
@@ -661,6 +735,37 @@ body {
 }
 .toggle-title { font-size: 12.5px; font-weight: 500; color: var(--text-primary); }
 .toggle-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.setting-switch {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-input);
+  border: 1px solid var(--border-item);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+}
+.setting-switch::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 1px;
+  inset-inline-start: 1px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+  transition: transform 0.18s ease;
+}
+.setting-switch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.setting-switch:checked::after { transform: translateX(16px); }
+[dir="rtl"] .setting-switch:checked::after { transform: translateX(-16px); }
+.setting-switch:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .theme-toggle { display: flex; gap: 5px; }
 .theme-btn {

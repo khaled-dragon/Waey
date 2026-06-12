@@ -150,6 +150,16 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
               style={{accentColor:"var(--accent)",width:15,height:15}} />
           </label>
 
+          <label className="toggle-row">
+            <div>
+              <div className="toggle-title">{isRtl ? "التشغيل مع بدء الجهاز" : "Launch on startup"}</div>
+              <div className="toggle-desc">{isRtl ? "تشغيل Waey تلقائياً عند فتح Windows" : "Start Waey automatically when Windows opens"}</div>
+            </div>
+            <input className="setting-switch" type="checkbox" checked={settings.launchOnStartup} disabled={isLoading}
+              onChange={(e) => update("launchOnStartup", e.currentTarget.checked)}
+            />
+          </label>
+
           <div className="settings-note">
             {isRtl ? "Alt+Space لفتح Waey. Ctrl+Space لتحديد منطقة." : "Alt+Space opens Waey. Ctrl+Space selects a region."}
           </div>

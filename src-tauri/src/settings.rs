@@ -1,6 +1,8 @@
 use crate::storage::open_app_database;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "windows")]
+use std::process::Command;
 use tauri::AppHandle;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -11,6 +13,7 @@ pub struct AppSettings {
     pub theme: ThemePreference,
     pub language: LanguagePreference,
     pub auto_capture_on_overlay: bool,
+    pub launch_on_startup: bool,
     pub selected_provider_id: Option<String>,
     pub selected_persona_id: Option<String>,
 }
@@ -54,6 +57,7 @@ pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
 
 pub fn save_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     validate_settings(&settings)?;
+    sync_launch_on_startup(settings.launch_on_startup)?;
 
     let connection = open_app_database(app)?;
     let values = [
@@ -67,6 +71,10 @@ pub fn save_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettin
         (
             "auto_capture_on_overlay",
             bool_to_string(settings.auto_capture_on_overlay).to_string(),
+        ),
+        (
+            "launch_on_startup",
+            bool_to_string(settings.launch_on_startup).to_string(),
         ),
         (
             "selected_provider_id",
@@ -99,6 +107,7 @@ pub fn default_settings() -> AppSettings {
         theme: ThemePreference::Dark,
         language: LanguagePreference::En,
         auto_capture_on_overlay: true,
+        launch_on_startup: false,
         selected_provider_id: None,
         selected_persona_id: None,
     }
@@ -123,6 +132,7 @@ fn apply_setting_value(settings: &mut AppSettings, key: &str, value: &str) {
         "theme" => settings.theme = theme_from_string(value),
         "language" => settings.language = language_from_string(value),
         "auto_capture_on_overlay" => settings.auto_capture_on_overlay = value == "true",
+        "launch_on_startup" => settings.launch_on_startup = value == "true",
         "selected_provider_id" => settings.selected_provider_id = optional_setting(value),
         "selected_persona_id" => settings.selected_persona_id = optional_setting(value),
         _ => {}
@@ -175,4 +185,38 @@ fn optional_setting(value: &str) -> Option<String> {
     } else {
         Some(trimmed_value.to_string())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn sync_launch_on_startup(enabled: bool) -> Result<(), String> {
+    const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    const VALUE_NAME: &str = "Waey";
+
+    let status = if enabled {
+        let executable_path = std::env::current_exe()
+            .map_err(|error| format!("Failed to resolve Waey executable: {error}"))?;
+        let command_value = format!("\"{}\"", executable_path.to_string_lossy());
+
+        Command::new("reg")
+            .args(["add", RUN_KEY, "/v", VALUE_NAME, "/t", "REG_SZ", "/d"])
+            .arg(command_value)
+            .args(["/f"])
+            .status()
+    } else {
+        Command::new("reg")
+            .args(["delete", RUN_KEY, "/v", VALUE_NAME, "/f"])
+            .status()
+    }
+    .map_err(|error| format!("Failed to update Windows startup setting: {error}"))?;
+
+    if enabled && !status.success() {
+        return Err("Failed to enable launch on startup.".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn sync_launch_on_startup(_enabled: bool) -> Result<(), String> {
+    Ok(())
 }
