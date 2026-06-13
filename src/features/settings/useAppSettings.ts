@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SETTINGS } from "../../shared/constants";
 import type { AppSettings } from "../../shared/types";
 import { getAppSettings, saveAppSettings } from "./settingsCommands";
@@ -7,6 +7,7 @@ export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const saveRequestId = useRef(0);
 
   const refreshSettings = useCallback(async () => {
     setIsLoadingSettings(true);
@@ -22,15 +23,25 @@ export function useAppSettings() {
   }, []);
 
   const updateSettings = useCallback(async (nextSettings: AppSettings) => {
+    const requestId = saveRequestId.current + 1;
+
+    saveRequestId.current = requestId;
+    setSettings(nextSettings);
     setSettingsError(null);
 
     try {
       const savedSettings = await saveAppSettings(nextSettings);
-      setSettings(savedSettings);
+
+      if (saveRequestId.current === requestId) {
+        setSettings(savedSettings);
+      }
     } catch (error) {
-      setSettingsError(error instanceof Error ? error.message : String(error));
+      if (saveRequestId.current === requestId) {
+        setSettingsError(error instanceof Error ? error.message : String(error));
+        await refreshSettings();
+      }
     }
-  }, []);
+  }, [refreshSettings]);
 
   useEffect(() => {
     void refreshSettings();

@@ -57,7 +57,11 @@ pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
 
 pub fn save_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     validate_settings(&settings)?;
-    sync_launch_on_startup(settings.launch_on_startup)?;
+
+    let current_settings = get_settings(app).unwrap_or_else(|_| default_settings());
+    if current_settings.launch_on_startup != settings.launch_on_startup {
+        sync_launch_on_startup(settings.launch_on_startup)?;
+    }
 
     let connection = open_app_database(app)?;
     let values = [
