@@ -52,12 +52,21 @@ Rust owns the desktop layer, capture flow, storage bridge, tray behavior, startu
 
 ## Getting Started
 
-### Requirements
+### Use Waey
+
+You do not need Node.js, Rust, or a local development setup to use Waey.
+
+Download the latest installer from the GitHub Releases page, install it, and open Waey. The desktop app is already bundled and ready to run.
+
+First-time users can start with the managed Waey provider preset. Users who prefer their own models can add an OpenRouter, Ollama, Groq, or custom OpenAI-compatible provider from Settings.
+
+### Develop Locally
+
+You only need the following tools if you want to run the source code, change Waey, or build the desktop bundles yourself:
 
 - Node.js
 - Rust
 - Tauri prerequisites for your target OS
-- A supported LLM provider key, unless you use the managed Waey provider preset
 
 ### Install Dependencies
 
