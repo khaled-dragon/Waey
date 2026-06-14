@@ -1,4 +1,4 @@
-x![App Screenshot](assets/Waey.png)
+![App Screenshot](assets/Waey.png)
 
 Waey is a screen-aware desktop AI assistant built for people who do not want to stop their flow just to explain what is already visible on their screen.
 
