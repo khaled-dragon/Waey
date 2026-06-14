@@ -1,4 +1,4 @@
-![App Screenshot](assets/Waey.png)
+![App Screenshot](assets/logo.svg)
 
 # Waey
 
