@@ -791,6 +791,32 @@ body {
   font-size: 11px; color: var(--text-muted); line-height: 1.5;
 }
 
+.settings-update-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-item);
+  border-radius: 7px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.update-status {
+  margin-top: 4px;
+  color: var(--accent-coral);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 @media (max-width: 420px), (max-height: 360px) {
   .titlebar {
     height: 30px;

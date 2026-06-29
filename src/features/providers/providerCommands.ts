@@ -1,8 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { LlmProvider, ProviderDraft } from "../../shared/types";
+import type { LlmProvider, ManagedProviderUpdate, ProviderDraft } from "../../shared/types";
 
 export function bootstrapManagedProvider() {
   return invoke<LlmProvider | null>("bootstrap_managed_provider");
+}
+
+export function checkManagedProviderUpdate() {
+  return invoke<ManagedProviderUpdate | null>("check_managed_provider_update");
+}
+
+export function applyManagedProviderUpdate() {
+  return invoke<LlmProvider>("apply_managed_provider_update");
 }
 
 export function listLlmProviders() {

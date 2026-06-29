@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import type { AppUpdateState } from "../features/updates";
 import type { AppSettings, LlmProvider, Persona, ProviderDraft, PersonaDraft, ProviderKind } from "../shared/types";
 
 interface SettingsPanelProps {
@@ -17,6 +18,9 @@ interface SettingsPanelProps {
   onSavePersona: (draft: PersonaDraft) => Promise<void>;
   onDeletePersona: (id: string) => Promise<void>;
   isRtl: boolean;
+  updateState: AppUpdateState;
+  onCheckForUpdate: () => Promise<void>;
+  onInstallUpdate: () => Promise<void>;
 }
 
 type Tab = "general" | "providers" | "personas";
@@ -30,7 +34,7 @@ function defaultBaseUrl(kind: ProviderKind) {
 const initialProviderDraft: ProviderDraft = { name: "", kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "", model: "" };
 const initialPersonaDraft: PersonaDraft = { name: "", prompt: "" };
 
-export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, settings, providers, personas, selectedProviderId, selectedPersonaId, onSelectProvider, onSelectPersona, onSaveProvider, onDeleteProvider, onSavePersona, onDeletePersona, isRtl }: SettingsPanelProps) {
+export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, settings, providers, personas, selectedProviderId, selectedPersonaId, onSelectProvider, onSelectPersona, onSaveProvider, onDeleteProvider, onSavePersona, onDeletePersona, isRtl, updateState, onCheckForUpdate, onInstallUpdate }: SettingsPanelProps) {
   const [tab, setTab] = useState<Tab>("general");
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(initialProviderDraft);
   const [personaDraft, setPersonaDraft] = useState<PersonaDraft>(initialPersonaDraft);
@@ -96,6 +100,10 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
     { id: "providers", label: "Providers", labelAr: "مزودون" },
     { id: "personas", label: "Personas", labelAr: "شخصيات" },
   ];
+  const updateBusy = updateState.status === "checking" || updateState.status === "downloading" || updateState.status === "installing";
+  const updateProgress = updateState.totalBytes && updateState.totalBytes > 0
+    ? Math.min(100, Math.round((updateState.downloadedBytes / updateState.totalBytes) * 100))
+    : null;
 
   return (
     <div className="panel">
@@ -163,9 +171,42 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
           <div className="settings-note">
             {isRtl ? "Alt+Space لفتح Waey. Ctrl+Space لتحديد منطقة." : "Alt+Space opens Waey. Ctrl+Space selects a region."}
           </div>
+          <div className="settings-update-card">
+            <div>
+              <div className="toggle-title">Updates</div>
+              <div className="toggle-desc">
+                {updateState.currentVersion ? `Current version ${updateState.currentVersion}` : "Check for Waey updates"}
+              </div>
+              {updateState.status === "available" && updateState.latestVersion && (
+                <div className="update-status">Update available: {updateState.latestVersion}</div>
+              )}
+              {updateState.status === "notAvailable" && (
+                <div className="update-status">You are up to date</div>
+              )}
+              {updateState.status === "downloading" && (
+                <div className="update-status">{updateProgress === null ? "Downloading update..." : `${updateProgress}%`}</div>
+              )}
+              {updateState.status === "installing" && (
+                <div className="update-status">Installing update...</div>
+              )}
+              {updateState.status === "error" && updateState.errorMessage && (
+                <div className="error-inline">{updateState.errorMessage}</div>
+              )}
+            </div>
+            <div className="settings-update-actions">
+              {updateState.status === "available" ? (
+                <button className="btn-primary" disabled={updateBusy} onClick={() => void onInstallUpdate()} type="button">
+                  Install
+                </button>
+              ) : (
+                <button className="btn-secondary" disabled={updateBusy} onClick={() => void onCheckForUpdate()} type="button">
+                  {updateState.status === "checking" ? "..." : "Check"}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
-
       {tab === "providers" && (
         <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
           <form className="panel-form" onSubmit={handleSaveProvider}>

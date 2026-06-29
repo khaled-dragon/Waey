@@ -19,6 +19,12 @@ export interface ProviderDraft {
   model: string;
 }
 
+export interface ManagedProviderUpdate {
+  provider: LlmProvider;
+  message?: string | null;
+  revision?: number | null;
+}
+
 export interface Persona {
   id: string;
   name: string;

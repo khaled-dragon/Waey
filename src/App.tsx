@@ -14,6 +14,7 @@ import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
 import { usePersonas } from "./features/personas";
 import { useProviders } from "./features/providers";
 import { useAppSettings } from "./features/settings";
+import { useAppUpdates } from "./features/updates";
 
 function App() {
   const activeWindow = new URLSearchParams(window.location.search).get("window");
@@ -31,7 +32,8 @@ function MainOverlay() {
   const [showClosePrompt, setShowClosePrompt] = useState(false);
 
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
-  const { deleteProvider, providers, saveProvider, selectedProvider, selectedProviderId, setSelectedProviderId } = useProviders();
+  const { checkForUpdate, dismissUpdate, installUpdate, updateState } = useAppUpdates();
+  const { applyManagedUpdate, deleteProvider, dismissManagedUpdate, pendingManagedProviderUpdate, providers, saveProvider, selectedProvider, selectedProviderId, setSelectedProviderId } = useProviders();
   const { deletePersona, personaError, personas, savePersona, selectedPersona, selectedPersonaId, setSelectedPersonaId } = usePersonas();
   const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, pinConversation, persistMessage, removeMessage, removeConversation, renameConversation, setMessages, startNewConversation } = useConversationHistory();
   const { cancelPrompt, editLastUserMessage, errorMessage, streamState, submitPrompt } = useLlmChat({ ensureConversation, messages, persistMessage, removeMessage, setMessages });
@@ -236,6 +238,9 @@ function MainOverlay() {
               onSavePersona={savePersonaAndSelect}
               onDeletePersona={deletePersonaAndClear}
               isRtl={isRtl}
+              updateState={updateState}
+              onCheckForUpdate={() => checkForUpdate(true)}
+              onInstallUpdate={installUpdate}
             />
           ) : (
             <div className="chat-layout">
@@ -291,6 +296,51 @@ function MainOverlay() {
               </button>
               <button className="btn-primary" onClick={keepChatAndClose} type="button">
                 {isRtl ? "البقاء في الشات" : "Keep Chat"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingManagedProviderUpdate && (
+        <div className="close-chat-backdrop" role="presentation">
+          <div className="close-chat-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-update-title">
+            <div className="close-chat-title" id="provider-update-title">
+              {isRtl ? "تحديث مقترح لمزود Waey" : "Waey provider update"}
+            </div>
+            <div className="close-chat-copy">
+              {pendingManagedProviderUpdate.message?.trim() ||
+                (isRtl
+                  ? `فيه تحديث جديد لمزود Waey الافتراضي. الموديل المقترح الآن هو ${pendingManagedProviderUpdate.provider.model}. التحديث لا يغير أي مزود أنت ضايفه بنفسك.`
+                  : `A new managed Waey provider update is available. The recommended model is now ${pendingManagedProviderUpdate.provider.model}. Your custom providers will not be changed.`)}
+            </div>
+            <div className="close-chat-actions">
+              <button className="btn-secondary" onClick={dismissManagedUpdate} type="button">
+                {isRtl ? "لاحقا" : "Later"}
+              </button>
+              <button className="btn-primary" onClick={() => void applyManagedUpdate()} type="button">
+                {isRtl ? "تحديث Waey" : "Update Waey"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {updateState.status === "available" && !pendingManagedProviderUpdate && (
+        <div className="close-chat-backdrop" role="presentation">
+          <div className="close-chat-dialog" role="dialog" aria-modal="true" aria-labelledby="app-update-title">
+            <div className="close-chat-title" id="app-update-title">
+              {isRtl ? "Waey update available" : "Waey update available"}
+            </div>
+            <div className="close-chat-copy">
+              {updateState.latestVersion
+                ? `Version ${updateState.latestVersion} is ready. You can install it now, or skip and check again from Settings.`
+                : "A new Waey version is ready. You can install it now, or skip and check again from Settings."}
+            </div>
+            <div className="close-chat-actions">
+              <button className="btn-secondary" onClick={dismissUpdate} type="button">
+                Later
+              </button>
+              <button className="btn-primary" onClick={() => void installUpdate()} type="button">
+                Update
               </button>
             </div>
           </div>

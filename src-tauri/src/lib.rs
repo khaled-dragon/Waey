@@ -16,7 +16,8 @@ use history::{
 use llm::{cancel_chat_completion, stream_chat_completion, LlmChatRequest, LlmRequestRegistry};
 use personas::{delete_persona, list_personas, save_persona, Persona, PersonaDraft};
 use providers::{
-    bootstrap_waey_provider, delete_provider, list_providers, save_provider, LlmProvider,
+    apply_waey_provider_update, bootstrap_waey_provider, check_waey_provider_update,
+    delete_provider, list_providers, save_provider, LlmProvider, ManagedProviderUpdate,
     ProviderDraft,
 };
 use serde::Serialize;
@@ -108,6 +109,18 @@ fn list_llm_providers(app: AppHandle) -> Result<Vec<LlmProvider>, String> {
 #[tauri::command]
 async fn bootstrap_managed_provider(app: AppHandle) -> Result<Option<LlmProvider>, String> {
     bootstrap_waey_provider(app).await
+}
+
+#[tauri::command]
+async fn check_managed_provider_update(
+    app: AppHandle,
+) -> Result<Option<ManagedProviderUpdate>, String> {
+    check_waey_provider_update(app).await
+}
+
+#[tauri::command]
+async fn apply_managed_provider_update(app: AppHandle) -> Result<LlmProvider, String> {
+    apply_waey_provider_update(app).await
 }
 
 #[tauri::command]
@@ -422,11 +435,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(LlmRequestRegistry::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Err(error) = restore_main_window(app) {
                 logger::error(format!("failed to restore Waey from second instance: {error}"));
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let log_directory = app
                 .path()
@@ -448,6 +463,8 @@ pub fn run() {
             capture_selected_region,
             cancel_region_selection,
             bootstrap_managed_provider,
+            check_managed_provider_update,
+            apply_managed_provider_update,
             list_llm_providers,
             save_llm_provider,
             delete_llm_provider,
