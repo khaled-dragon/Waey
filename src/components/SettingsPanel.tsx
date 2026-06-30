@@ -42,6 +42,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
   const [personaError, setPersonaError] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
   const [savingPersona, setSavingPersona] = useState(false);
+  const managedProviders = providers.filter((provider) => provider.managed);
   const visibleProviders = providers.filter((provider) => !provider.managed);
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
@@ -227,7 +228,20 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             <button className="btn-primary" disabled={savingProvider} type="submit">{savingProvider ? "..." : (isRtl ? "حفظ المزود" : "Save Provider")}</button>
           </form>
           <div className="item-list">
-            {visibleProviders.length === 0 ? <div className="empty-list">{isRtl ? "لا يوجد مزودون بعد" : "No providers yet"}</div> : visibleProviders.map((p) => (
+            {managedProviders.map((p) => (
+              <div key={p.id} className={`list-item managed-provider-card ${selectedProviderId===p.id?"list-item--active":""}`}>
+                <button className="list-item-info" onClick={() => onSelectProvider(p.id)} type="button">
+                  <div className="list-item-name">
+                    <span>{p.name}</span>
+                    <span className="badge-active">Managed</span>
+                    {selectedProviderId===p.id && <span className="badge-active">{isRtl ? "نشط" : "Active"}</span>}
+                  </div>
+                  <div className="list-item-sub">{p.model}</div>
+                  <div className="managed-provider-note">API key is managed securely by Waey</div>
+                </button>
+              </div>
+            ))}
+            {visibleProviders.length === 0 && managedProviders.length === 0 ? <div className="empty-list">{isRtl ? "لا يوجد مزودون بعد" : "No providers yet"}</div> : visibleProviders.map((p) => (
               <div key={p.id} className={`list-item ${selectedProviderId===p.id?"list-item--active":""}`}>
                 <button className="list-item-info" onClick={() => handleSelectProvider(p)} type="button">
                   <div className="list-item-name">{p.name}</div>

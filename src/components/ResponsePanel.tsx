@@ -163,10 +163,12 @@ interface FormattedAssistantMessageProps {
 }
 
 function FormattedAssistantMessage({ content, isRtl }: FormattedAssistantMessageProps) {
-  const segments = parseMessageSegments(content);
+  const { answer, thinking } = parseAssistantThinking(content);
+  const segments = parseMessageSegments(answer);
 
   return (
     <>
+      {thinking.length > 0 && <ThinkingDisclosure content={thinking} isRtl={isRtl} />}
       {segments.map((segment, index) =>
         segment.type === "code" ? (
           <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} />
@@ -175,6 +177,22 @@ function FormattedAssistantMessage({ content, isRtl }: FormattedAssistantMessage
         ),
       )}
     </>
+  );
+}
+
+interface ThinkingDisclosureProps {
+  content: string;
+  isRtl: boolean;
+}
+
+function ThinkingDisclosure({ content, isRtl }: ThinkingDisclosureProps) {
+  const summary = isRtl ? "طريقة التفكير" : "Thinking";
+
+  return (
+    <details className="thinking-disclosure">
+      <summary>{summary}</summary>
+      <div className="thinking-disclosure-body">{content}</div>
+    </details>
   );
 }
 
@@ -235,6 +253,39 @@ function parseMessageSegments(content: string): MessageSegment[] {
   }
 
   return segments.length > 0 ? segments : [{ type: "text", content }];
+}
+
+function parseAssistantThinking(content: string) {
+  const thinkingParts: string[] = [];
+  let answer = "";
+  let cursor = 0;
+  const completeThinkPattern = /<think>([\s\S]*?)<\/think>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = completeThinkPattern.exec(content)) !== null) {
+    answer += content.slice(cursor, match.index);
+    thinkingParts.push(match[1]?.trim() ?? "");
+    cursor = match.index + match[0].length;
+  }
+
+  answer += content.slice(cursor);
+
+  const openThinkIndex = answer.toLowerCase().indexOf("<think>");
+  if (openThinkIndex >= 0) {
+    const visibleAnswer = answer.slice(0, openThinkIndex);
+    const streamingThinking = answer.slice(openThinkIndex + "<think>".length);
+
+    answer = visibleAnswer;
+    thinkingParts.push(streamingThinking.trim());
+  }
+
+  const cleanAnswer = answer.replace(/<\/think>/gi, "").trimStart();
+  const thinking = thinkingParts.filter(Boolean).join("\n\n");
+
+  return {
+    answer: cleanAnswer,
+    thinking,
+  };
 }
 
 interface CapturePreviewItem {
