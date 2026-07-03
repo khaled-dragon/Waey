@@ -96,7 +96,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
                   </button>
                 )}
               </div>
-              {streamState === "streaming" && message.role === "assistant" && !message.content.trim() ? (
+              {streamState === "streaming" && message.role === "assistant" && !message.content.trim() && !message.reasoningContent?.trim() ? (
                 <div className="thinking-indicator" role="status" aria-live="polite">
                   <div className="thinking-track">
                     <div className="thinking-gradient" />
@@ -129,7 +129,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
                 </form>
               ) : (
                 <div className="message-bubble">
-                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} /> : message.content}
+                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} reasoningContent={message.reasoningContent} /> : message.content}
                 </div>
               )}
             </div>
@@ -160,15 +160,17 @@ type MessageSegment =
 interface FormattedAssistantMessageProps {
   content: string;
   isRtl: boolean;
+  reasoningContent?: string;
 }
 
-function FormattedAssistantMessage({ content, isRtl }: FormattedAssistantMessageProps) {
+function FormattedAssistantMessage({ content, isRtl, reasoningContent }: FormattedAssistantMessageProps) {
   const { answer, thinking } = parseAssistantThinking(content);
+  const visibleThinking = reasoningContent?.trim() || thinking;
   const segments = parseMessageSegments(answer);
 
   return (
     <>
-      {thinking.length > 0 && <ThinkingDisclosure content={thinking} isRtl={isRtl} />}
+      {visibleThinking.length > 0 && <ThinkingDisclosure content={visibleThinking} isRtl={isRtl} />}
       {segments.map((segment, index) =>
         segment.type === "code" ? (
           <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} />

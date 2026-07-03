@@ -18,6 +18,7 @@ interface StreamTokenEvent {
 
 interface StreamStatusEvent {
   requestId: string;
+  finishReason?: string | null;
 }
 
 interface StreamErrorEvent {
@@ -36,6 +37,7 @@ export function useLlmChat({
   const assistantMessageByRequest = useRef<Map<string, ChatMessage>>(new Map());
   const conversationByRequest = useRef<Map<string, string>>(new Map());
   const contentByRequest = useRef<Map<string, string>>(new Map());
+  const reasoningByRequest = useRef<Map<string, string>>(new Map());
   const [activeStreamingRequestId, setActiveStreamingRequestId] = useState<string | null>(null);
   const [streamState, setStreamState] = useState<StreamState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -82,6 +84,7 @@ export function useLlmChat({
       assistantMessageByRequest.current.set(requestId, assistantMessage);
       conversationByRequest.current.set(requestId, conversationId);
       contentByRequest.current.set(requestId, "");
+      reasoningByRequest.current.set(requestId, "");
       setActiveStreamingRequestId(requestId);
       setStreamState("streaming");
       setErrorMessage(null);
@@ -171,6 +174,7 @@ export function useLlmChat({
       assistantMessageByRequest.current.set(requestId, assistantMessage);
       conversationByRequest.current.set(requestId, conversationId);
       contentByRequest.current.set(requestId, "");
+      reasoningByRequest.current.set(requestId, "");
       setActiveStreamingRequestId(requestId);
       setStreamState("streaming");
       setErrorMessage(null);
@@ -239,6 +243,23 @@ export function useLlmChat({
 
   useEffect(() => {
     const pendingListeners = [
+      listen<StreamTokenEvent>("llm-stream-reasoning", (event) => {
+        if (event.payload.requestId !== activeRequestId.current) {
+          return;
+        }
+
+        const currentReasoning = reasoningByRequest.current.get(event.payload.requestId) ?? "";
+        const nextReasoning = currentReasoning + event.payload.token;
+        reasoningByRequest.current.set(event.payload.requestId, nextReasoning);
+
+        setMessages((currentMessages) =>
+          currentMessages.map((message) =>
+            message.id === event.payload.requestId
+              ? { ...message, reasoningContent: nextReasoning }
+              : message,
+          ),
+        );
+      }),
       listen<StreamTokenEvent>("llm-stream-token", (event) => {
         if (event.payload.requestId !== activeRequestId.current) {
           return;
@@ -269,6 +290,12 @@ export function useLlmChat({
           void persistMessage({ ...assistantMessage, content }, conversationId);
         }
 
+        if (event.payload.finishReason === "length") {
+          setErrorMessage(
+            "Waey stopped because this response reached the provider output limit. Try asking for a shorter answer or continue with a follow-up.",
+          );
+        }
+
         cleanupRequest(event.payload.requestId);
         setStreamState("idle");
       }),
@@ -296,6 +323,7 @@ export function useLlmChat({
     assistantMessageByRequest.current.delete(requestId);
     conversationByRequest.current.delete(requestId);
     contentByRequest.current.delete(requestId);
+    reasoningByRequest.current.delete(requestId);
   }
 
   return {

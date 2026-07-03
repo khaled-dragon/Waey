@@ -89,6 +89,7 @@ export interface ChatMessage {
   id: string;
   role: ChatMessageRole;
   content: string;
+  reasoningContent?: string;
   conversationId?: string;
   capturePath?: string | null;
   capturePaths?: string[];

@@ -7,8 +7,11 @@ use std::{collections::HashSet, fs, path::Path, sync::Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 const STREAM_TOKEN_EVENT: &str = "llm-stream-token";
+const STREAM_REASONING_EVENT: &str = "llm-stream-reasoning";
 const STREAM_DONE_EVENT: &str = "llm-stream-done";
 const STREAM_ERROR_EVENT: &str = "llm-stream-error";
+
+const GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 12_000;
 
 #[derive(Default)]
 pub struct LlmRequestRegistry {
@@ -53,6 +56,7 @@ struct StreamToken {
 #[serde(rename_all = "camelCase")]
 struct StreamStatus {
     request_id: String,
+    finish_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,7 +67,7 @@ struct StreamError {
 }
 
 enum StreamCompletion {
-    Done,
+    Done(Option<String>),
     Cancelled,
 }
 
@@ -76,11 +80,12 @@ pub async fn stream_chat_completion(app: AppHandle, request: LlmChatRequest) -> 
     let result = stream_openai_compatible_response(&app, &request).await;
 
     match result {
-        Ok(StreamCompletion::Done) => app
+        Ok(StreamCompletion::Done(finish_reason)) => app
             .emit(
                 STREAM_DONE_EVENT,
                 StreamStatus {
                     request_id: request.request_id,
+                    finish_reason,
                 },
             )
             .map_err(|error| error.to_string()),
@@ -139,11 +144,13 @@ async fn stream_openai_compatible_response(
         while let Some(line_break_index) = pending_chunk.find('\n') {
             let line = pending_chunk[..line_break_index].trim().to_string();
             pending_chunk = pending_chunk[line_break_index + 1..].to_string();
-            handle_stream_line(app, &request.request_id, &line)?;
+            if let Some(finish_reason) = handle_stream_line(app, &request.request_id, &line)? {
+                return Ok(StreamCompletion::Done(Some(finish_reason)));
+            }
         }
     }
 
-    Ok(StreamCompletion::Done)
+    Ok(StreamCompletion::Done(None))
 }
 
 fn request_registry(app: &AppHandle) -> tauri::State<'_, LlmRequestRegistry> {
@@ -218,11 +225,19 @@ fn chat_request_body(request: &LlmChatRequest) -> Result<Value, String> {
         "content": user_message_content(request)?
     }));
 
-    Ok(json!({
+    let mut body = json!({
         "model": request.provider.model,
         "stream": true,
         "messages": messages
-    }))
+    });
+
+    if uses_groq_qwen_reasoning(&request.provider) {
+        body["max_completion_tokens"] = json!(GROQ_QWEN_MAX_COMPLETION_TOKENS);
+        body["reasoning_format"] = json!("parsed");
+        body["reasoning_effort"] = json!("default");
+    }
+
+    Ok(body)
 }
 
 fn persona_system_message(request: &LlmChatRequest) -> Option<Value> {
@@ -321,30 +336,61 @@ fn chat_completions_endpoint(base_url: &str) -> String {
     }
 }
 
-fn handle_stream_line(app: &AppHandle, request_id: &str, line: &str) -> Result<(), String> {
+fn handle_stream_line(
+    app: &AppHandle,
+    request_id: &str,
+    line: &str,
+) -> Result<Option<String>, String> {
     if !line.starts_with("data:") {
-        return Ok(());
+        return Ok(None);
     }
 
     let data = line.trim_start_matches("data:").trim();
 
     if data == "[DONE]" {
-        return Ok(());
+        return Ok(None);
     }
 
     let value: Value = serde_json::from_str(data).map_err(|error| error.to_string())?;
-    let Some(token) = value["choices"][0]["delta"]["content"].as_str() else {
-        return Ok(());
-    };
+    let choice = &value["choices"][0];
+    let delta = &choice["delta"];
 
+    if let Some(reasoning) = reasoning_token(delta) {
+        emit_stream_token(app, STREAM_REASONING_EVENT, request_id, reasoning)?;
+    }
+
+    if let Some(token) = delta["content"].as_str() {
+        emit_stream_token(app, STREAM_TOKEN_EVENT, request_id, token)?;
+    }
+
+    Ok(choice["finish_reason"].as_str().map(ToString::to_string))
+}
+
+fn emit_stream_token(
+    app: &AppHandle,
+    event_name: &str,
+    request_id: &str,
+    token: &str,
+) -> Result<(), String> {
     app.emit(
-        STREAM_TOKEN_EVENT,
+        event_name,
         StreamToken {
             request_id: request_id.to_string(),
             token: token.to_string(),
         },
     )
     .map_err(|error| error.to_string())
+}
+
+fn reasoning_token(delta: &Value) -> Option<&str> {
+    delta["reasoning"]
+        .as_str()
+        .or_else(|| delta["reasoning_content"].as_str())
+        .or_else(|| delta["reasoningContent"].as_str())
+}
+
+fn uses_groq_qwen_reasoning(provider: &LlmProvider) -> bool {
+    provider.base_url.contains("api.groq.com") && provider.model.starts_with("qwen/")
 }
 
 fn history_role_to_string(role: &LlmHistoryRole) -> &'static str {
