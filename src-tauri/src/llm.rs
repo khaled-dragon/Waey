@@ -11,7 +11,8 @@ const STREAM_REASONING_EVENT: &str = "llm-stream-reasoning";
 const STREAM_DONE_EVENT: &str = "llm-stream-done";
 const STREAM_ERROR_EVENT: &str = "llm-stream-error";
 
-const GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 12_000;
+const MANAGED_GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 2_048;
+const CUSTOM_GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 4_096;
 
 #[derive(Default)]
 pub struct LlmRequestRegistry {
@@ -232,9 +233,9 @@ fn chat_request_body(request: &LlmChatRequest) -> Result<Value, String> {
     });
 
     if uses_groq_qwen_reasoning(&request.provider) {
-        body["max_completion_tokens"] = json!(GROQ_QWEN_MAX_COMPLETION_TOKENS);
+        body["max_completion_tokens"] = json!(groq_qwen_max_completion_tokens(&request.provider));
         body["reasoning_format"] = json!("parsed");
-        body["reasoning_effort"] = json!("default");
+        body["reasoning_effort"] = json!(groq_qwen_reasoning_effort(&request.provider));
     }
 
     Ok(body)
@@ -391,6 +392,22 @@ fn reasoning_token(delta: &Value) -> Option<&str> {
 
 fn uses_groq_qwen_reasoning(provider: &LlmProvider) -> bool {
     provider.base_url.contains("api.groq.com") && provider.model.starts_with("qwen/")
+}
+
+fn groq_qwen_max_completion_tokens(provider: &LlmProvider) -> u32 {
+    if provider.managed {
+        MANAGED_GROQ_QWEN_MAX_COMPLETION_TOKENS
+    } else {
+        CUSTOM_GROQ_QWEN_MAX_COMPLETION_TOKENS
+    }
+}
+
+fn groq_qwen_reasoning_effort(provider: &LlmProvider) -> &'static str {
+    if provider.managed {
+        "none"
+    } else {
+        "default"
+    }
 }
 
 fn history_role_to_string(role: &LlmHistoryRole) -> &'static str {
