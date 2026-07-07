@@ -1,4 +1,5 @@
 use crate::providers::{LlmProvider, ProviderKind};
+use crate::ui_context::UiContextSnapshot;
 use base64::{engine::general_purpose, Engine};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,7 @@ pub struct LlmChatRequest {
     pub persona_prompt: Option<String>,
     pub capture_path: Option<String>,
     pub capture_paths: Option<Vec<String>>,
+    pub ui_contexts: Option<Vec<UiContextSnapshot>>,
     pub history_messages: Vec<LlmHistoryMessage>,
 }
 
@@ -270,14 +272,15 @@ fn history_messages(request: &LlmChatRequest) -> Vec<Value> {
 
 fn user_message_content(request: &LlmChatRequest) -> Result<Value, String> {
     let capture_paths = normalized_capture_paths(request);
+    let prompt = prompt_with_ui_context(request);
 
     if capture_paths.is_empty() {
-        return Ok(json!(request.prompt));
+        return Ok(json!(prompt));
     };
 
     let mut content = vec![json!({
         "type": "text",
-        "text": request.prompt
+        "text": prompt
     })];
 
     for capture_path in capture_paths {
@@ -290,6 +293,108 @@ fn user_message_content(request: &LlmChatRequest) -> Result<Value, String> {
     }
 
     Ok(json!(content))
+}
+
+fn prompt_with_ui_context(request: &LlmChatRequest) -> String {
+    let Some(contexts) = request.ui_contexts.as_ref() else {
+        return request.prompt.clone();
+    };
+
+    let formatted_contexts = contexts
+        .iter()
+        .take(3)
+        .enumerate()
+        .filter_map(|(index, context)| format_ui_context(index + 1, context))
+        .collect::<Vec<_>>();
+
+    if formatted_contexts.is_empty() {
+        return request.prompt.clone();
+    }
+
+    format!(
+        "{}\n\nReadable screen structure captured with the screenshot:\n{}",
+        request.prompt,
+        formatted_contexts.join("\n\n")
+    )
+}
+
+fn format_ui_context(index: usize, context: &UiContextSnapshot) -> Option<String> {
+    if context.elements.is_empty()
+        && context
+            .active_window_title
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+    {
+        return None;
+    }
+
+    let mut lines = vec![format!("Screenshot {index}:")];
+
+    if let Some(title) = non_empty(context.active_window_title.as_deref()) {
+        lines.push(format!("- Active window: {title}"));
+    }
+
+    if let Some(app_name) = non_empty(context.active_app_name.as_deref()) {
+        lines.push(format!("- App: {app_name}"));
+    }
+
+    if let Some(region) = &context.region {
+        lines.push(format!(
+            "- Selected region: x={}, y={}, width={}, height={}",
+            region.x, region.y, region.width, region.height
+        ));
+    }
+
+    if !context.elements.is_empty() {
+        lines.push("- Visible UI elements:".to_string());
+
+        for (element_index, element) in context.elements.iter().take(80).enumerate() {
+            let mut flags = Vec::new();
+
+            if element.focused {
+                flags.push("focused");
+            }
+
+            if element.under_cursor {
+                flags.push("under cursor");
+            }
+
+            let name = non_empty(Some(&element.name)).unwrap_or("(unnamed)");
+            let value = non_empty(element.value.as_deref())
+                .map(|value| format!(" value=\"{value}\""))
+                .unwrap_or_default();
+            let automation_id = non_empty(element.automation_id.as_deref())
+                .map(|automation_id| format!(" id=\"{automation_id}\""))
+                .unwrap_or_default();
+            let flags = if flags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", flags.join(", "))
+            };
+
+            lines.push(format!(
+                "  {}. {} \"{}\"{}{} at x={}, y={}, w={}, h={}{}",
+                element_index + 1,
+                element.role,
+                name,
+                value,
+                automation_id,
+                element.bounds.x,
+                element.bounds.y,
+                element.bounds.width,
+                element.bounds.height,
+                flags
+            ));
+        }
+    }
+
+    Some(lines.join("\n"))
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 fn normalized_capture_paths(request: &LlmChatRequest) -> Vec<&str> {

@@ -34,6 +34,9 @@ export function sendLlmPrompt({
       personaPrompt: persona?.prompt ?? null,
       capturePath: capture?.path ?? capturePath ?? null,
       capturePaths: attachedCapturePaths.length > 0 ? attachedCapturePaths : undefined,
+      uiContexts: captures
+        ?.map((attachedCapture) => attachedCapture.uiContext)
+        .filter((uiContext) => uiContext !== null && uiContext !== undefined),
       historyMessages: historyMessages.map((message) => ({
         role: message.role,
         content: message.content,

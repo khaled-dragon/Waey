@@ -53,6 +53,7 @@ export interface AppSettings {
   theme: "system" | "dark" | "light";
   language: "en" | "ar";
   autoCaptureOnOverlay: boolean;
+  attachUiContext: boolean;
   launchOnStartup: boolean;
   selectedProviderId?: string;
   selectedPersonaId?: string;
@@ -68,6 +69,26 @@ export interface ScreenCapture {
   originY: number;
   source: ScreenCaptureSource;
   createdAt: number;
+  uiContext?: UiContextSnapshot | null;
+}
+
+export interface UiContextSnapshot {
+  platform: "windows";
+  activeWindowTitle?: string | null;
+  activeAppName?: string | null;
+  capturedAt: number;
+  region?: CaptureRect | null;
+  elements: UiElementSummary[];
+}
+
+export interface UiElementSummary {
+  role: string;
+  name: string;
+  value?: string | null;
+  automationId?: string | null;
+  bounds: CaptureRect;
+  focused: boolean;
+  underCursor: boolean;
 }
 
 export interface ScreenCaptureError {

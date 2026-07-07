@@ -6,6 +6,7 @@ mod personas;
 mod providers;
 mod settings;
 mod storage;
+mod ui_context;
 
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
 use history::{
@@ -59,7 +60,7 @@ fn show_region_selector_window(app: AppHandle) -> Result<(), String> {
 fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
     hide_window_safely(&app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_full_screen();
+    let capture_result = capture_full_screen(attach_ui_context(&app));
 
     restore_main_window(&app)?;
 
@@ -79,7 +80,7 @@ fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
 fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCapture, String> {
     hide_window_safely(&app, REGION_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_screen_region(rect);
+    let capture_result = capture_screen_region(rect, attach_ui_context(&app));
 
     restore_main_window(&app)?;
 
@@ -214,7 +215,29 @@ fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
 
 #[tauri::command]
 fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
-    save_settings(&app, settings)
+    validate_shortcut_settings(&settings)?;
+    let previous_settings = get_settings(&app).ok();
+    let hotkeys_changed = previous_settings
+        .as_ref()
+        .map(|previous| {
+            previous.hotkey_overlay != settings.hotkey_overlay
+                || previous.hotkey_region != settings.hotkey_region
+        })
+        .unwrap_or(true);
+    let saved_settings = save_settings(&app, settings)?;
+
+    if hotkeys_changed {
+        if let Err(error) = configure_global_shortcuts(&app) {
+            if let Some(previous) = previous_settings {
+                let _ = save_settings(&app, previous);
+                let _ = configure_global_shortcuts(&app);
+            }
+
+            return Err(error);
+        }
+    }
+
+    Ok(saved_settings)
 }
 
 fn window_by_label(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
@@ -233,7 +256,7 @@ fn show_overlay(app: &AppHandle) -> Result<(), String> {
 
     hide_window_safely(app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_full_screen();
+    let capture_result = capture_full_screen(attach_ui_context(app));
 
     restore_main_window(app)?;
 
@@ -309,6 +332,18 @@ fn auto_capture_on_overlay(app: &AppHandle) -> bool {
     }
 }
 
+fn attach_ui_context(app: &AppHandle) -> bool {
+    match get_settings(app) {
+        Ok(settings) => settings.attach_ui_context,
+        Err(error) => {
+            logger::warn(format!(
+                "failed to read settings; attaching UI context: {error}"
+            ));
+            true
+        }
+    }
+}
+
 fn current_timestamp_millis() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -319,14 +354,7 @@ fn current_timestamp_millis() -> u128 {
 fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
     #[cfg(desktop)]
     {
-        use tauri_plugin_global_shortcut::{
-            Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
-        };
-
-        let overlay_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
-        let registered_overlay_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
-        let region_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
-        let registered_region_shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
+        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
         if let Err(error) = app.handle().plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -339,12 +367,12 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
                         return;
                     }
 
-                    if shortcut == &overlay_shortcut {
+                    if is_configured_shortcut(app, shortcut, ShortcutAction::Overlay) {
                         if let Err(error) = show_overlay(app) {
                             logger::error(format!("failed to show Waey overlay: {error}"));
                         }
                     }
-                    if shortcut == &region_shortcut {
+                    if is_configured_shortcut(app, shortcut, ShortcutAction::Region) {
                         if let Err(error) = show_region_selector(app) {
                             logger::error(format!("failed to show Waey region selector: {error}"));
                         }
@@ -359,19 +387,129 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
             return Ok(());
         }
 
-        if let Err(e) = app.global_shortcut().register(registered_overlay_shortcut) {
-            logger::error(format!("failed to register overlay shortcut: {e}"));
+        if let Err(error) = configure_global_shortcuts(app.handle()) {
+            logger::error(format!("failed to register Waey shortcuts: {error}"));
             let _ = restore_main_window(app.handle());
-        } else {
-            logger::info("registered overlay shortcut");
-        }
-        if let Err(e) = app.global_shortcut().register(registered_region_shortcut) {
-            logger::error(format!("failed to register region shortcut: {e}"));
-        } else {
-            logger::info("registered region shortcut");
         }
     }
     Ok(())
+}
+
+#[cfg(desktop)]
+enum ShortcutAction {
+    Overlay,
+    Region,
+}
+
+#[cfg(desktop)]
+fn configure_global_shortcuts(app: &AppHandle) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    let settings = get_settings(app)?;
+    let overlay_shortcut = shortcut_for_registration(&settings.hotkey_overlay);
+    let region_shortcut = shortcut_for_registration(&settings.hotkey_region);
+
+    if overlay_shortcut == region_shortcut {
+        return Err("Overlay and region shortcuts must be different.".to_string());
+    }
+
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|error| error.to_string())?;
+    app.global_shortcut()
+        .register(overlay_shortcut.as_str())
+        .map_err(|error| format!("Failed to register overlay shortcut: {error}"))?;
+    app.global_shortcut()
+        .register(region_shortcut.as_str())
+        .map_err(|error| format!("Failed to register region shortcut: {error}"))?;
+
+    logger::info(format!(
+        "registered shortcuts: overlay={}, region={}",
+        settings.hotkey_overlay, settings.hotkey_region
+    ));
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+fn configure_global_shortcuts(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+fn validate_shortcut_settings(settings: &AppSettings) -> Result<(), String> {
+    if shortcut_for_registration(&settings.hotkey_overlay)
+        == shortcut_for_registration(&settings.hotkey_region)
+    {
+        return Err("Overlay and region shortcuts must be different.".to_string());
+    }
+
+    #[cfg(desktop)]
+    {
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::Shortcut;
+
+        Shortcut::from_str(&shortcut_for_registration(&settings.hotkey_overlay))
+            .map_err(|error| format!("Invalid overlay shortcut: {error}"))?;
+        Shortcut::from_str(&shortcut_for_registration(&settings.hotkey_region))
+            .map_err(|error| format!("Invalid region shortcut: {error}"))?;
+    }
+
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn is_configured_shortcut(
+    app: &AppHandle,
+    shortcut: &tauri_plugin_global_shortcut::Shortcut,
+    action: ShortcutAction,
+) -> bool {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    let Ok(settings) = get_settings(app) else {
+        return false;
+    };
+
+    let configured_shortcut = match action {
+        ShortcutAction::Overlay => shortcut_for_registration(&settings.hotkey_overlay),
+        ShortcutAction::Region => shortcut_for_registration(&settings.hotkey_region),
+    };
+
+    let Ok(configured_shortcut) = Shortcut::from_str(&configured_shortcut) else {
+        return false;
+    };
+
+    shortcut.id() == configured_shortcut.id()
+}
+
+fn shortcut_for_registration(shortcut: &str) -> String {
+    shortcut
+        .split('+')
+        .map(|part| match part.trim().to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => "CTRL".to_string(),
+            "cmdorctrl" | "commandorcontrol" => "CmdOrCtrl".to_string(),
+            "alt" => "Alt".to_string(),
+            "shift" => "Shift".to_string(),
+            "super" | "meta" | "cmd" | "command" => "Super".to_string(),
+            value => normalize_key_token(value),
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn normalize_key_token(value: &str) -> String {
+    if value.len() == 1 {
+        let character = value.chars().next().unwrap_or_default();
+
+        if character.is_ascii_alphabetic() {
+            return format!("Key{}", character.to_ascii_uppercase());
+        }
+
+        if character.is_ascii_digit() {
+            return format!("Digit{character}");
+        }
+    }
+
+    value.to_string()
 }
 
 fn any_waey_window_is_visible(app: &AppHandle) -> bool {
@@ -438,7 +576,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Err(error) = restore_main_window(app) {
-                logger::error(format!("failed to restore Waey from second instance: {error}"));
+                logger::error(format!(
+                    "failed to restore Waey from second instance: {error}"
+                ));
             }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())

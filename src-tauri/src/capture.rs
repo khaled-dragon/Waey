@@ -1,3 +1,4 @@
+use crate::ui_context::{capture_ui_context, UiContextRect, UiContextSnapshot};
 use screenshots::Screen;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,6 +19,7 @@ pub struct ScreenCapture {
     pub origin_y: i32,
     pub source: CaptureSource,
     pub created_at: u128,
+    pub ui_context: Option<UiContextSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -36,7 +38,7 @@ pub struct CaptureRect {
     pub height: u32,
 }
 
-pub fn capture_full_screen() -> Result<ScreenCapture, String> {
+pub fn capture_full_screen(include_ui_context: bool) -> Result<ScreenCapture, String> {
     let screen = Screen::all()
         .map_err(|error| error.to_string())?
         .into_iter()
@@ -58,10 +60,16 @@ pub fn capture_full_screen() -> Result<ScreenCapture, String> {
         origin_y: screen.display_info.y,
         source: CaptureSource::FullScreen,
         created_at,
+        ui_context: include_ui_context
+            .then(|| capture_ui_context(None))
+            .flatten(),
     })
 }
 
-pub fn capture_screen_region(rect: CaptureRect) -> Result<ScreenCapture, String> {
+pub fn capture_screen_region(
+    rect: CaptureRect,
+    include_ui_context: bool,
+) -> Result<ScreenCapture, String> {
     if rect.width == 0 || rect.height == 0 {
         return Err("Capture region must have a positive width and height.".to_string());
     }
@@ -76,6 +84,13 @@ pub fn capture_screen_region(rect: CaptureRect) -> Result<ScreenCapture, String>
     image.save(&path).map_err(|error| error.to_string())?;
     prune_old_captures();
 
+    let ui_region = UiContextRect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    };
+
     Ok(ScreenCapture {
         path: path_to_string(path),
         width: image.width(),
@@ -84,6 +99,9 @@ pub fn capture_screen_region(rect: CaptureRect) -> Result<ScreenCapture, String>
         origin_y: rect.y,
         source: CaptureSource::Region,
         created_at,
+        ui_context: include_ui_context
+            .then(|| capture_ui_context(Some(ui_region)))
+            .flatten(),
     })
 }
 

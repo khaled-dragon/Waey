@@ -6,16 +6,18 @@ Open it with a global shortcut, let it capture the current screen, ask your ques
 
 ## What Waey Does
 
-Waey sits quietly on your desktop and opens as an always-on-top overlay when you need it. It can attach screenshots, stream model responses, keep local chat history, remember personas, and work with OpenAI-compatible providers.
+Waey sits quietly on your desktop and opens as an always-on-top overlay when you need it. It can attach screenshots, read safe UI structure from the active screen on Windows, stream model responses, keep local chat history, remember personas, and work with OpenAI-compatible providers.
 
 The goal is simple: make AI feel closer to the work on your screen, not like a separate tab you have to keep feeding with context.
 
 ## Features
 
-- Global overlay shortcut with `Alt+Space`
-- Region selection shortcut with `Ctrl+Space`
+- Global overlay shortcut with `Alt+Space` by default
+- Region selection shortcut with `Ctrl+Space` by default
+- Customizable keyboard shortcuts from Settings
 - Full-screen capture when the overlay opens
 - Up to 3 screenshots attached to the same message
+- Readable screen structure on Windows, including visible buttons, fields, labels, window title, and element bounds
 - OpenAI-compatible provider support
 - OpenRouter, Ollama, Groq, and custom base URL support
 - Managed default Waey provider bootstrap for first-time users
@@ -38,6 +40,8 @@ Waey is not a chatbot window with a screenshot button added later. The product i
 
 The overlay is compact, draggable, resizable, and meant to stay out of the way while still being ready for real work. A user can open Waey, ask about the screen, attach more context, cancel a bad request, edit the last prompt, or return to a pinned chat without leaving the desktop workflow.
 
+Waey combines visual capture with structured desktop context. The screenshot helps the model understand layout, graphics, code, charts, images, and visual state. The readable UI structure gives it extra precision around what controls are visible, where they are, and what labels or fields exist on the screen. This hybrid approach makes simple questions faster to answer and makes UI-heavy screens easier for the model to reason about.
+
 ## Tech Stack
 
 - Tauri 2
@@ -48,7 +52,7 @@ The overlay is compact, draggable, resizable, and meant to stay out of the way w
 - SQLite
 - Vite
 
-Rust owns the desktop layer, capture flow, storage bridge, tray behavior, startup behavior, and model streaming. React owns the overlay interface, chat workflow, settings, history, and interaction states.
+Rust owns the desktop layer, capture flow, readable UI context, storage bridge, tray behavior, startup behavior, shortcut registration, and model streaming. React owns the overlay interface, chat workflow, settings, history, and interaction states.
 
 ## Getting Started
 
@@ -152,20 +156,24 @@ The app is split around clear responsibilities:
 - `src/components` contains UI surfaces.
 - `src/features` contains frontend feature workflows.
 - `src/shared` contains shared TypeScript types and defaults.
-- `src-tauri/src` contains Rust commands, persistence, capture, providers, settings, and LLM streaming.
+- `src-tauri/src` contains Rust commands, persistence, capture, readable UI context, providers, settings, shortcuts, and LLM streaming.
 - `.github/workflows` builds and releases the app through GitHub Actions.
 
 ## Keyboard Shortcuts
 
 ```text
-Alt+Space   Open Waey overlay
-Ctrl+Space  Open region selector
+Alt+Space   Open Waey overlay by default
+Ctrl+Space  Open region selector by default
 Esc         Close the active overlay flow
 ```
 
+The overlay and region shortcuts can be changed from Settings. Waey validates new shortcuts before saving them and restores the previous shortcut set if registration fails.
+
 ## Privacy Notes
 
-Waey only sends the prompt, selected conversation context, and attached screenshots to the provider selected by the user. Local history and settings stay on the device.
+Waey only sends the prompt, selected conversation context, attached screenshots, and optional readable screen structure to the provider selected by the user. Local history and settings stay on the device.
+
+Readable screen structure is designed to be conservative. It is optional, it is used as extra context for screenshots, and it filters sensitive password fields before anything reaches the selected model provider. On non-Windows systems, Waey falls back to screenshot-based context without breaking the app.
 
 Because providers are configurable, privacy and retention behavior also depend on the provider used. For sensitive work, choose a provider you trust or use a local provider such as Ollama.
 

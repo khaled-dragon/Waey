@@ -53,9 +53,10 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
       return;
     }
 
-    await onEditLastUserMessage(messageId, draftContent);
+    const nextContent = draftContent;
     setEditingMessageId(null);
     setDraftContent("");
+    await onEditLastUserMessage(messageId, nextContent);
   }
 
   return (

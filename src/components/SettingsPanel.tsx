@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { AppUpdateState } from "../features/updates";
 import type { AppSettings, LlmProvider, Persona, ProviderDraft, PersonaDraft, ProviderKind } from "../shared/types";
 
@@ -24,6 +24,7 @@ interface SettingsPanelProps {
 }
 
 type Tab = "general" | "providers" | "personas";
+type ShortcutTarget = "overlay" | "region";
 
 function defaultBaseUrl(kind: ProviderKind) {
   if (kind === "ollama") return "http://localhost:11434/v1";
@@ -38,12 +39,24 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
   const [tab, setTab] = useState<Tab>("general");
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(initialProviderDraft);
   const [personaDraft, setPersonaDraft] = useState<PersonaDraft>(initialPersonaDraft);
+  const [shortcutDraft, setShortcutDraft] = useState({
+    hotkeyOverlay: settings.hotkeyOverlay,
+    hotkeyRegion: settings.hotkeyRegion,
+  });
+  const [listeningShortcut, setListeningShortcut] = useState<ShortcutTarget | null>(null);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [personaError, setPersonaError] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
   const [savingPersona, setSavingPersona] = useState(false);
   const managedProviders = providers.filter((provider) => provider.managed);
   const visibleProviders = providers.filter((provider) => !provider.managed);
+
+  useEffect(() => {
+    setShortcutDraft({
+      hotkeyOverlay: settings.hotkeyOverlay,
+      hotkeyRegion: settings.hotkeyRegion,
+    });
+  }, [settings.hotkeyOverlay, settings.hotkeyRegion]);
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     void onChangeSettings({ ...settings, [key]: value });
@@ -55,6 +68,36 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
 
   function updatePersonaDraft<K extends keyof PersonaDraft>(key: K, value: PersonaDraft[K]) {
     setPersonaDraft((draft) => ({ ...draft, [key]: value }));
+  }
+
+  function captureShortcut(target: ShortcutTarget, event: KeyboardEvent<HTMLButtonElement>) {
+    if (listeningShortcut !== target) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const shortcut = shortcutFromKeyboardEvent(event);
+
+    if (!shortcut) {
+      return;
+    }
+
+    setShortcutDraft((draft) => ({
+      ...draft,
+      [target === "overlay" ? "hotkeyOverlay" : "hotkeyRegion"]: shortcut,
+    }));
+    setListeningShortcut(null);
+  }
+
+  function saveShortcutDraft() {
+    setListeningShortcut(null);
+    void onChangeSettings({
+      ...settings,
+      hotkeyOverlay: shortcutDraft.hotkeyOverlay,
+      hotkeyRegion: shortcutDraft.hotkeyRegion,
+    });
   }
 
   async function handleSaveProvider(e: FormEvent) {
@@ -105,6 +148,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
   const updateProgress = updateState.totalBytes && updateState.totalBytes > 0
     ? Math.min(100, Math.round((updateState.downloadedBytes / updateState.totalBytes) * 100))
     : null;
+  const shortcutsChanged = shortcutDraft.hotkeyOverlay !== settings.hotkeyOverlay || shortcutDraft.hotkeyRegion !== settings.hotkeyRegion;
 
   return (
     <div className="panel">
@@ -149,6 +193,34 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             </div>
           </div>
 
+          <div className="shortcut-card">
+            <div className="shortcut-card-head">
+              <div>
+                <div className="toggle-title">{isRtl ? "اختصارات Waey" : "Keyboard shortcuts"}</div>
+                <div className="toggle-desc">{isRtl ? "اضغط على الاختصار ثم استخدم المفاتيح الجديدة" : "Click a shortcut, then press the new key combo"}</div>
+              </div>
+              <button className="btn-secondary" disabled={!shortcutsChanged || isLoading} onClick={saveShortcutDraft} type="button">
+                {isRtl ? "حفظ" : "Save"}
+              </button>
+            </div>
+            <ShortcutEditorRow
+              isListening={listeningShortcut === "overlay"}
+              label={isRtl ? "فتح Waey" : "Open Waey"}
+              onBlur={() => setListeningShortcut(null)}
+              onClick={() => setListeningShortcut("overlay")}
+              onKeyDown={(event) => captureShortcut("overlay", event)}
+              shortcut={shortcutDraft.hotkeyOverlay}
+            />
+            <ShortcutEditorRow
+              isListening={listeningShortcut === "region"}
+              label={isRtl ? "تحديد منطقة" : "Select region"}
+              onBlur={() => setListeningShortcut(null)}
+              onClick={() => setListeningShortcut("region")}
+              onKeyDown={(event) => captureShortcut("region", event)}
+              shortcut={shortcutDraft.hotkeyRegion}
+            />
+          </div>
+
           <label className="toggle-row">
             <div>
               <div className="toggle-title">{isRtl ? "التقاط تلقائي عند الفتح" : "Auto capture on open"}</div>
@@ -157,6 +229,16 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             <input type="checkbox" checked={settings.autoCaptureOnOverlay} disabled={isLoading}
               onChange={(e) => update("autoCaptureOnOverlay", e.currentTarget.checked)}
               style={{accentColor:"var(--accent)",width:15,height:15}} />
+          </label>
+
+          <label className="toggle-row">
+            <div>
+              <div className="toggle-title">{isRtl ? "قراءة عناصر الشاشة" : "Readable screen structure"}</div>
+              <div className="toggle-desc">{isRtl ? "إرفاق أسماء الأزرار والحقول والعناوين بشكل آمن مع اللقطات" : "Attach safe button, field, and label context with screenshots"}</div>
+            </div>
+            <input className="setting-switch" type="checkbox" checked={settings.attachUiContext} disabled={isLoading}
+              onChange={(e) => update("attachUiContext", e.currentTarget.checked)}
+            />
           </label>
 
           <label className="toggle-row">
@@ -170,7 +252,9 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
           </label>
 
           <div className="settings-note">
-            {isRtl ? "Alt+Space لفتح Waey. Ctrl+Space لتحديد منطقة." : "Alt+Space opens Waey. Ctrl+Space selects a region."}
+            {isRtl
+              ? `${shortcutDraft.hotkeyOverlay} لفتح Waey. ${shortcutDraft.hotkeyRegion} لتحديد منطقة.`
+              : `${shortcutDraft.hotkeyOverlay} opens Waey. ${shortcutDraft.hotkeyRegion} selects a region.`}
           </div>
           <div className="settings-update-card">
             <div>
@@ -290,4 +374,96 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
       )}
     </div>
   );
+}
+
+interface ShortcutEditorRowProps {
+  isListening: boolean;
+  label: string;
+  onBlur: () => void;
+  onClick: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  shortcut: string;
+}
+
+function ShortcutEditorRow({ isListening, label, onBlur, onClick, onKeyDown, shortcut }: ShortcutEditorRowProps) {
+  return (
+    <div className="shortcut-row">
+      <span className="shortcut-label">{label}</span>
+      <button
+        className={`shortcut-capture ${isListening ? "shortcut-capture--listening" : ""}`}
+        onBlur={onBlur}
+        onClick={onClick}
+        onKeyDown={onKeyDown}
+        type="button"
+      >
+        {isListening ? (
+          <span className="shortcut-waiting">Press keys...</span>
+        ) : (
+          shortcutParts(shortcut).map((part, index) => (
+            <span className="shortcut-part-wrap" key={`${part}-${index}`}>
+              {index > 0 && <span className="shortcut-plus">+</span>}
+              <span className="shortcut-key">{displayShortcutPart(part)}</span>
+            </span>
+          ))
+        )}
+      </button>
+    </div>
+  );
+}
+
+function shortcutFromKeyboardEvent(event: KeyboardEvent<HTMLButtonElement>) {
+  const key = shortcutKeyFromCode(event.code);
+
+  if (!key) {
+    return null;
+  }
+
+  const modifiers = [
+    event.ctrlKey ? "Ctrl" : null,
+    event.altKey ? "Alt" : null,
+    event.shiftKey ? "Shift" : null,
+    event.metaKey ? "Super" : null,
+  ].filter(Boolean) as string[];
+
+  if (modifiers.length === 0) {
+    return null;
+  }
+
+  return [...modifiers, key].join("+");
+}
+
+function shortcutKeyFromCode(code: string) {
+  if (["AltLeft", "AltRight", "ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"].includes(code)) {
+    return null;
+  }
+
+  if (/^Key[A-Z]$/.test(code) || /^Digit[0-9]$/.test(code) || /^F([1-9]|1[0-2])$/.test(code)) {
+    return code;
+  }
+
+  if (["Space", "Enter", "Tab", "Escape", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(code)) {
+    return code;
+  }
+
+  return null;
+}
+
+function shortcutParts(shortcut: string) {
+  return shortcut.split("+").map((part) => part.trim()).filter(Boolean);
+}
+
+function displayShortcutPart(part: string) {
+  if (/^Key[A-Z]$/.test(part)) {
+    return part.replace("Key", "");
+  }
+
+  if (/^Digit[0-9]$/.test(part)) {
+    return part.replace("Digit", "");
+  }
+
+  if (part === "CTRL") {
+    return "Ctrl";
+  }
+
+  return part;
 }
