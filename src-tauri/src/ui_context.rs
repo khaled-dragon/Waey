@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::process::{Command, Stdio};
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -43,14 +45,9 @@ pub fn capture_ui_context(region: Option<UiContextRect>) -> Option<UiContextSnap
         return None;
     }
 
-    let output = run_powershell_hidden(UIA_SCRIPT, UI_CONTEXT_TIMEOUT)?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    let mut snapshot = serde_json::from_str::<UiContextSnapshot>(&stdout).ok()?;
+    let stdout = run_uia_script_hidden(UIA_SCRIPT, UI_CONTEXT_TIMEOUT)?;
+    let mut snapshot =
+        serde_json::from_str::<UiContextSnapshot>(stdout.trim_start_matches('\u{feff}')).ok()?;
     snapshot.captured_at = timestamp_millis();
     snapshot.region = region.clone();
     snapshot.elements = filter_elements(snapshot.elements, region);
@@ -58,20 +55,32 @@ pub fn capture_ui_context(region: Option<UiContextRect>) -> Option<UiContextSnap
     Some(snapshot)
 }
 
-fn run_powershell_hidden(script: &str, timeout: Duration) -> Option<std::process::Output> {
-    let mut command = Command::new("powershell.exe");
+fn run_uia_script_hidden(script: &str, timeout: Duration) -> Option<String> {
+    let run_id = format!("{}_{}", std::process::id(), timestamp_millis());
+    let script_path = temp_file_path(&run_id, "ps1");
+    let runner_path = temp_file_path(&run_id, "vbs");
+    let output_path = temp_file_path(&run_id, "json");
+
+    fs::create_dir_all(script_path.parent()?).ok()?;
+    fs::write(&script_path, powershell_file_content(script)).ok()?;
+    fs::write(&runner_path, vbs_runner_content(&script_path, &output_path)).ok()?;
+
+    let output = run_wscript_hidden(&runner_path, timeout);
+    let json = output
+        .filter(|output| output.status.success())
+        .and_then(|_| fs::read_to_string(&output_path).ok());
+
+    let _ = fs::remove_file(script_path);
+    let _ = fs::remove_file(runner_path);
+    let _ = fs::remove_file(output_path);
+
+    json
+}
+
+fn run_wscript_hidden(runner_path: &PathBuf, timeout: Duration) -> Option<Output> {
+    let mut command = Command::new("wscript.exe");
     command
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ])
+        .args(["//B", "//NoLogo", runner_path.to_str()?])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -99,6 +108,34 @@ fn run_powershell_hidden(script: &str, timeout: Duration) -> Option<std::process
 
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn temp_file_path(run_id: &str, extension: &str) -> PathBuf {
+    std::env::temp_dir()
+        .join("waey")
+        .join("ui-context")
+        .join(format!("waey-ui-context-{run_id}.{extension}"))
+}
+
+fn powershell_file_content(script: &str) -> String {
+    format!("param([string]$OutputFile)\n{script}")
+}
+
+fn vbs_runner_content(script_path: &PathBuf, output_path: &PathBuf) -> String {
+    let powershell_path = std::env::var("SystemRoot")
+        .map(|root| format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"))
+        .unwrap_or_else(|_| "powershell.exe".to_string());
+    let command = format!(
+        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\"",
+        powershell_path,
+        script_path.display(),
+        output_path.display()
+    );
+
+    format!(
+        "Set shell = CreateObject(\"WScript.Shell\")\nexitCode = shell.Run(\"{}\", 0, True)\nWScript.Quit exitCode\n",
+        command.replace('"', "\"\"")
+    )
 }
 
 fn filter_elements(
@@ -319,5 +356,11 @@ $snapshot = [PSCustomObject]@{
   elements = $elements
 }
 
-$snapshot | ConvertTo-Json -Depth 8 -Compress
+$json = $snapshot | ConvertTo-Json -Depth 8 -Compress
+if ($OutputFile) {
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($OutputFile, $json, $utf8NoBom)
+} else {
+  $json
+}
 "#;
