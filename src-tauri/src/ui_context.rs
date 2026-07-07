@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MAX_UI_ELEMENTS: usize = 120;
+const UI_CONTEXT_TIMEOUT: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,16 +43,7 @@ pub fn capture_ui_context(region: Option<UiContextRect>) -> Option<UiContextSnap
         return None;
     }
 
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            UIA_SCRIPT,
-        ])
-        .output()
-        .ok()?;
+    let output = run_powershell_hidden(UIA_SCRIPT, UI_CONTEXT_TIMEOUT)?;
 
     if !output.status.success() {
         return None;
@@ -63,6 +56,49 @@ pub fn capture_ui_context(region: Option<UiContextRect>) -> Option<UiContextSnap
     snapshot.elements = filter_elements(snapshot.elements, region);
 
     Some(snapshot)
+}
+
+fn run_powershell_hidden(script: &str, timeout: Duration) -> Option<std::process::Output> {
+    let mut command = Command::new("powershell.exe");
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = command.spawn().ok()?;
+    let started_at = Instant::now();
+
+    loop {
+        if child.try_wait().ok()?.is_some() {
+            return child.wait_with_output().ok();
+        }
+
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn filter_elements(
@@ -222,7 +258,7 @@ function Walk-Elements($root, $cursorX, $cursorY, $focusedHandle) {
   $queue.Enqueue([PSCustomObject]@{ Element = $root; Depth = 0 })
   $items = New-Object System.Collections.Generic.List[object]
 
-  while ($queue.Count -gt 0 -and $items.Count -lt 220) {
+  while ($queue.Count -gt 0 -and $items.Count -lt 140) {
     $current = $queue.Dequeue()
     $converted = Convert-Element $current.Element $cursorX $cursorY $focusedHandle
 

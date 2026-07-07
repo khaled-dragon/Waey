@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { AppUpdateState } from "../features/updates";
 import type { AppSettings, LlmProvider, Persona, ProviderDraft, PersonaDraft, ProviderKind } from "../shared/types";
 
@@ -58,6 +58,32 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
     });
   }, [settings.hotkeyOverlay, settings.hotkeyRegion]);
 
+  useEffect(() => {
+    if (!listeningShortcut) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const shortcut = shortcutFromKeyboardEvent(event);
+
+      if (!shortcut) {
+        return;
+      }
+
+      setShortcutDraft((draft) => ({
+        ...draft,
+        [listeningShortcut === "overlay" ? "hotkeyOverlay" : "hotkeyRegion"]: shortcut,
+      }));
+      setListeningShortcut(null);
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [listeningShortcut]);
+
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     void onChangeSettings({ ...settings, [key]: value });
   }
@@ -70,7 +96,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
     setPersonaDraft((draft) => ({ ...draft, [key]: value }));
   }
 
-  function captureShortcut(target: ShortcutTarget, event: KeyboardEvent<HTMLButtonElement>) {
+  function captureShortcut(target: ShortcutTarget, event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (listeningShortcut !== target) {
       return;
     }
@@ -381,7 +407,7 @@ interface ShortcutEditorRowProps {
   label: string;
   onBlur: () => void;
   onClick: () => void;
-  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   shortcut: string;
 }
 
@@ -411,7 +437,7 @@ function ShortcutEditorRow({ isListening, label, onBlur, onClick, onKeyDown, sho
   );
 }
 
-function shortcutFromKeyboardEvent(event: KeyboardEvent<HTMLButtonElement>) {
+function shortcutFromKeyboardEvent(event: KeyboardEvent | ReactKeyboardEvent<HTMLButtonElement>) {
   const key = shortcutKeyFromCode(event.code);
 
   if (!key) {
