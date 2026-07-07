@@ -14,7 +14,6 @@ The goal is simple: make AI feel closer to the work on your screen, not like a s
 
 - Global overlay shortcut with `Alt+Space` by default
 - Region selection shortcut with `Ctrl+Space` by default
-- Customizable keyboard shortcuts from Settings
 - Full-screen capture when the overlay opens
 - Up to 3 screenshots attached to the same message
 - Readable screen structure on Windows, including visible buttons, fields, labels, window title, and element bounds
@@ -166,8 +165,6 @@ Alt+Space   Open Waey overlay by default
 Ctrl+Space  Open region selector by default
 Esc         Close the active overlay flow
 ```
-
-The overlay and region shortcuts can be changed from Settings. Waey validates new shortcuts before saving them and restores the previous shortcut set if registration fails.
 
 ## Privacy Notes
 

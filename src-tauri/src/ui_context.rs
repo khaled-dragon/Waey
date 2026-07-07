@@ -159,21 +159,7 @@ fn timestamp_millis() -> u128 {
 
 const UIA_SCRIPT: &str = r#"
 Add-Type -AssemblyName UIAutomationClient
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-
-public static class NativeMethods {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-}
-
-public struct POINT {
-  public int X;
-  public int Y;
-}
-'@
+Add-Type -AssemblyName System.Windows.Forms
 
 function Clean-Text([string]$value, [int]$maxLength = 180) {
   if ([string]::IsNullOrWhiteSpace($value)) { return $null }
@@ -211,7 +197,7 @@ function Get-SafeValue($element, [string]$role) {
   }
 }
 
-function Convert-Element($element, $cursorX, $cursorY, $focusedHandle) {
+function Convert-Element($element, $cursorX, $cursorY) {
   try {
     if ($element.Current.IsOffscreen) { return $null }
     if ($element.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsPasswordProperty)) { return $null }
@@ -228,10 +214,7 @@ function Convert-Element($element, $cursorX, $cursorY, $focusedHandle) {
     $automationId = Clean-Text $element.Current.AutomationId 120
     $underCursor = $cursorX -ge $rect.Left -and $cursorX -le $rect.Right -and $cursorY -ge $rect.Top -and $cursorY -le $rect.Bottom
     $focused = $false
-
-    try {
-      $focused = $element.Current.NativeWindowHandle -ne 0 -and $element.Current.NativeWindowHandle -eq $focusedHandle
-    } catch {}
+    try { $focused = [bool]$element.Current.HasKeyboardFocus } catch {}
 
     return [PSCustomObject]@{
       role = $role
@@ -252,7 +235,7 @@ function Convert-Element($element, $cursorX, $cursorY, $focusedHandle) {
   }
 }
 
-function Walk-Elements($root, $cursorX, $cursorY, $focusedHandle) {
+function Walk-Elements($root, $cursorX, $cursorY) {
   $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
   $queue = New-Object System.Collections.Queue
   $queue.Enqueue([PSCustomObject]@{ Element = $root; Depth = 0 })
@@ -260,7 +243,7 @@ function Walk-Elements($root, $cursorX, $cursorY, $focusedHandle) {
 
   while ($queue.Count -gt 0 -and $items.Count -lt 140) {
     $current = $queue.Dequeue()
-    $converted = Convert-Element $current.Element $cursorX $cursorY $focusedHandle
+    $converted = Convert-Element $current.Element $cursorX $cursorY
 
     if ($null -ne $converted) {
       $items.Add($converted)
@@ -280,16 +263,39 @@ function Walk-Elements($root, $cursorX, $cursorY, $focusedHandle) {
   return $items
 }
 
-$cursorPoint = New-Object POINT
-[NativeMethods]::GetCursorPos([ref]$cursorPoint) | Out-Null
-$handle = [NativeMethods]::GetForegroundWindow()
-$processIdValue = [uint32]0
-[NativeMethods]::GetWindowThreadProcessId($handle, [ref]$processIdValue) | Out-Null
+function Get-ContextRoot {
+  $focused = $null
+  try { $focused = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
+  if ($null -eq $focused) { return $null }
 
-$activeElement = $null
-try {
-  $activeElement = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-} catch {}
+  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  $current = $focused
+  $lastUseful = $focused
+
+  while ($null -ne $current) {
+    try {
+      $role = Get-ControlTypeName $current
+      if ($role -eq 'Window' -or $role -eq 'Pane' -or $role -eq 'Document') {
+        $lastUseful = $current
+      }
+
+      $parent = $walker.GetParent($current)
+      if ($null -eq $parent) { break }
+
+      $parentRole = Get-ControlTypeName $parent
+      if ($parentRole -eq 'Desktop') { break }
+
+      $current = $parent
+    } catch {
+      break
+    }
+  }
+
+  return $lastUseful
+}
+
+$cursorPoint = [System.Windows.Forms.Cursor]::Position
+$activeElement = Get-ContextRoot
 
 $activeWindowTitle = $null
 $activeAppName = $null
@@ -297,8 +303,11 @@ $elements = @()
 
 if ($null -ne $activeElement) {
   try { $activeWindowTitle = Clean-Text $activeElement.Current.Name 220 } catch {}
-  try { $activeAppName = (Get-Process -Id $processIdValue -ErrorAction SilentlyContinue).ProcessName } catch {}
-  $elements = Walk-Elements $activeElement $cursorPoint.X $cursorPoint.Y $activeElement.Current.NativeWindowHandle
+  try {
+    $processIdValue = $activeElement.Current.ProcessId
+    $activeAppName = (Get-Process -Id $processIdValue -ErrorAction SilentlyContinue).ProcessName
+  } catch {}
+  $elements = Walk-Elements $activeElement $cursorPoint.X $cursorPoint.Y
 }
 
 $snapshot = [PSCustomObject]@{
