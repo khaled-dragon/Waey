@@ -27,6 +27,9 @@ The goal is simple: make AI feel closer to the work on your screen, not like a s
 - Cancel an active model response
 - Personas for reusable system prompts
 - Code block rendering with one-click copy
+- Optional Developer Mode for fast local code context from allowed workspaces
+- Developer access levels for quick read assistance or approved file edits
+- Worked timer for longer model responses
 - Light, dark, and system themes
 - English and Arabic UI direction support
 - Optional launch on startup
@@ -40,6 +43,20 @@ Waey is not a chatbot window with a screenshot button added later. The product i
 The overlay is compact, draggable, resizable, and meant to stay out of the way while still being ready for real work. A user can open Waey, ask about the screen, attach more context, cancel a bad request, edit the last prompt, or return to a pinned chat without leaving the desktop workflow.
 
 Waey combines visual capture with structured desktop context. The screenshot helps the model understand layout, graphics, code, charts, images, and visual state. The readable UI structure gives it extra precision around what controls are visible, where they are, and what labels or fields exist on the screen. This hybrid approach makes simple questions faster to answer and makes UI-heavy screens easier for the model to reason about.
+
+## Developer Mode
+
+Developer Mode is optional and off by default. It is built for quick coding help when a screenshot is not enough, such as asking about an error in the current editor, checking a component, or getting a focused fix for a file that is already open.
+
+When enabled, the user chooses allowed workspace folders from Settings. Waey can then attach bounded code context from those folders to the next prompt, while ignoring heavy folders such as `node_modules`, `.git`, `target`, `dist`, and `build`. It also avoids secret-like files such as `.env`, `.pem`, and `.key`.
+
+Access levels are available from the chat bar:
+
+- `Ask`: asks before reading workspace files.
+- `Assist`: reads from allowed workspaces and asks before edits.
+- `Auto`: can apply approved Waey edit blocks inside allowed workspaces.
+
+For edits, Waey only writes to existing files inside allowed workspaces and blocks secret-like files. The feature is intended for fast, focused help, not for replacing a full coding agent.
 
 ## Tech Stack
 
@@ -155,7 +172,7 @@ The app is split around clear responsibilities:
 - `src/components` contains UI surfaces.
 - `src/features` contains frontend feature workflows.
 - `src/shared` contains shared TypeScript types and defaults.
-- `src-tauri/src` contains Rust commands, persistence, capture, readable UI context, providers, settings, shortcuts, and LLM streaming.
+- `src-tauri/src` contains Rust commands, persistence, capture, readable UI context, developer workspace context, providers, settings, shortcuts, and LLM streaming.
 - `.github/workflows` builds and releases the app through GitHub Actions.
 
 ## Keyboard Shortcuts
@@ -171,6 +188,8 @@ Esc         Close the active overlay flow
 Waey only sends the prompt, selected conversation context, attached screenshots, and optional readable screen structure to the provider selected by the user. Local history and settings stay on the device.
 
 Readable screen structure is designed to be conservative. It is optional, it is used as extra context for screenshots, and it filters sensitive password fields before anything reaches the selected model provider. On non-Windows systems, Waey falls back to screenshot-based context without breaking the app.
+
+Developer Mode can send selected local code context from user-approved workspace folders to the chosen model provider. If the user allows a model to read or edit local files, the user is responsible for reviewing the output, choosing a trusted provider, and understanding any impact of those actions. Use it carefully and only with folders you are comfortable exposing to the selected model.
 
 Because providers are configurable, privacy and retention behavior also depend on the provider used. For sensitive work, choose a provider you trust or use a local provider such as Ollama.
 

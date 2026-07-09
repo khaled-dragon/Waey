@@ -1,4 +1,5 @@
 mod capture;
+mod dev_context;
 mod history;
 mod llm;
 mod logger;
@@ -9,6 +10,7 @@ mod storage;
 mod ui_context;
 
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
+use dev_context::{build_developer_context, write_developer_file};
 use history::{
     create_conversation, delete_conversation, delete_message, list_conversations, list_messages,
     rename_conversation, save_message, set_conversation_pin, ChatMessage, ChatMessageDraft,
@@ -494,7 +496,9 @@ pub fn run() {
             save_prompt_persona,
             delete_prompt_persona,
             get_app_settings,
-            save_app_settings
+            save_app_settings,
+            build_developer_context,
+            write_developer_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

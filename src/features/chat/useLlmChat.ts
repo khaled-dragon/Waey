@@ -38,9 +38,11 @@ export function useLlmChat({
   const conversationByRequest = useRef<Map<string, string>>(new Map());
   const contentByRequest = useRef<Map<string, string>>(new Map());
   const reasoningByRequest = useRef<Map<string, string>>(new Map());
+  const startedAtByRequest = useRef<Map<string, number>>(new Map());
   const [activeStreamingRequestId, setActiveStreamingRequestId] = useState<string | null>(null);
   const [streamState, setStreamState] = useState<StreamState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [workedForMs, setWorkedForMs] = useState<number | null>(null);
 
   const submitPrompt = useCallback(
     async (
@@ -85,8 +87,10 @@ export function useLlmChat({
       conversationByRequest.current.set(requestId, conversationId);
       contentByRequest.current.set(requestId, "");
       reasoningByRequest.current.set(requestId, "");
+      startedAtByRequest.current.set(requestId, Date.now());
       setActiveStreamingRequestId(requestId);
       setStreamState("streaming");
+      setWorkedForMs(0);
       setErrorMessage(null);
       setMessages((currentMessages) => [...currentMessages, userMessage, assistantMessage]);
 
@@ -175,8 +179,10 @@ export function useLlmChat({
       conversationByRequest.current.set(requestId, conversationId);
       contentByRequest.current.set(requestId, "");
       reasoningByRequest.current.set(requestId, "");
+      startedAtByRequest.current.set(requestId, Date.now());
       setActiveStreamingRequestId(requestId);
       setStreamState("streaming");
+      setWorkedForMs(0);
       setErrorMessage(null);
       setMessages((currentMessages) => {
         const nextMessages = [...currentMessages];
@@ -238,8 +244,25 @@ export function useLlmChat({
     setMessages((currentMessages) => currentMessages.filter((message) => message.id !== requestId));
     cleanupRequest(requestId);
     setErrorMessage(null);
+    setWorkedForMs(null);
     setStreamState("idle");
   }, [setMessages]);
+
+  useEffect(() => {
+    if (streamState !== "streaming" || !activeStreamingRequestId) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const startedAt = startedAtByRequest.current.get(activeStreamingRequestId);
+
+      if (startedAt) {
+        setWorkedForMs(Date.now() - startedAt);
+      }
+    }, 500);
+
+    return () => window.clearInterval(timer);
+  }, [activeStreamingRequestId, streamState]);
 
   useEffect(() => {
     const pendingListeners = [
@@ -296,6 +319,7 @@ export function useLlmChat({
           );
         }
 
+        finalizeWorkedDuration(event.payload.requestId);
         cleanupRequest(event.payload.requestId);
         setStreamState("idle");
       }),
@@ -304,6 +328,7 @@ export function useLlmChat({
           return;
         }
 
+        finalizeWorkedDuration(event.payload.requestId);
         cleanupRequest(event.payload.requestId);
         setErrorMessage(event.payload.message);
         setStreamState("error");
@@ -324,6 +349,15 @@ export function useLlmChat({
     conversationByRequest.current.delete(requestId);
     contentByRequest.current.delete(requestId);
     reasoningByRequest.current.delete(requestId);
+    startedAtByRequest.current.delete(requestId);
+  }
+
+  function finalizeWorkedDuration(requestId: string) {
+    const startedAt = startedAtByRequest.current.get(requestId);
+
+    if (startedAt) {
+      setWorkedForMs(Date.now() - startedAt);
+    }
   }
 
   return {
@@ -333,5 +367,6 @@ export function useLlmChat({
     errorMessage,
     streamState,
     submitPrompt,
+    workedForMs,
   };
 }

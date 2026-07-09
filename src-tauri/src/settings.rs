@@ -17,6 +17,9 @@ pub struct AppSettings {
     pub launch_on_startup: bool,
     pub selected_provider_id: Option<String>,
     pub selected_persona_id: Option<String>,
+    pub developer_mode_enabled: bool,
+    pub developer_access_level: DeveloperAccessLevel,
+    pub developer_workspaces: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,6 +35,14 @@ pub enum ThemePreference {
 pub enum LanguagePreference {
     En,
     Ar,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeveloperAccessLevel {
+    Ask,
+    Assist,
+    Auto,
 }
 
 pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
@@ -93,6 +104,19 @@ pub fn save_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettin
             "selected_persona_id",
             settings.selected_persona_id.clone().unwrap_or_default(),
         ),
+        (
+            "developer_mode_enabled",
+            bool_to_string(settings.developer_mode_enabled).to_string(),
+        ),
+        (
+            "developer_access_level",
+            developer_access_level_to_string(&settings.developer_access_level).to_string(),
+        ),
+        (
+            "developer_workspaces",
+            serde_json::to_string(&settings.developer_workspaces)
+                .map_err(|error| error.to_string())?,
+        ),
     ];
 
     for (key, value) in values {
@@ -120,6 +144,9 @@ pub fn default_settings() -> AppSettings {
         launch_on_startup: false,
         selected_provider_id: None,
         selected_persona_id: None,
+        developer_mode_enabled: false,
+        developer_access_level: DeveloperAccessLevel::Assist,
+        developer_workspaces: Vec::new(),
     }
 }
 
@@ -130,6 +157,10 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
 
     if settings.hotkey_region.trim().is_empty() {
         return Err("Region hotkey is required.".to_string());
+    }
+
+    if settings.developer_workspaces.len() > 8 {
+        return Err("Developer mode supports up to 8 workspaces.".to_string());
     }
 
     Ok(())
@@ -146,6 +177,14 @@ fn apply_setting_value(settings: &mut AppSettings, key: &str, value: &str) {
         "launch_on_startup" => settings.launch_on_startup = value == "true",
         "selected_provider_id" => settings.selected_provider_id = optional_setting(value),
         "selected_persona_id" => settings.selected_persona_id = optional_setting(value),
+        "developer_mode_enabled" => settings.developer_mode_enabled = value == "true",
+        "developer_access_level" => {
+            settings.developer_access_level = developer_access_level_from_string(value)
+        }
+        "developer_workspaces" => {
+            settings.developer_workspaces =
+                serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
+        }
         _ => {}
     }
 }
@@ -177,6 +216,22 @@ fn language_from_string(value: &str) -> LanguagePreference {
     match value {
         "ar" => LanguagePreference::Ar,
         _ => LanguagePreference::En,
+    }
+}
+
+fn developer_access_level_to_string(access_level: &DeveloperAccessLevel) -> &'static str {
+    match access_level {
+        DeveloperAccessLevel::Ask => "ask",
+        DeveloperAccessLevel::Assist => "assist",
+        DeveloperAccessLevel::Auto => "auto",
+    }
+}
+
+fn developer_access_level_from_string(value: &str) -> DeveloperAccessLevel {
+    match value {
+        "ask" => DeveloperAccessLevel::Ask,
+        "auto" => DeveloperAccessLevel::Auto,
+        _ => DeveloperAccessLevel::Assist,
     }
 }
 

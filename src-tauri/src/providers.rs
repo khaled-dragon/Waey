@@ -1,13 +1,18 @@
 use crate::{logger, storage::open_app_database};
+use reqwest::header::{HeaderValue, AUTHORIZATION};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri::AppHandle;
 use uuid::Uuid;
 
-const WAEY_MANAGED_PROVIDER_ENDPOINT: &str =
-    "https://khaled135-waey-preset.hf.space/waey-provider";
+const WAEY_MANAGED_PROVIDER_ENDPOINT: &str = "https://khaled135-waey-preset.hf.space/waey-provider";
 const WAEY_MANAGED_PROVIDER_ID: &str = "waey-managed-groq";
+const OCTO_INK_DROPS: [u8; 37] = [
+    33, 47, 22, 24, 10, 27, 35, 11, 36, 5, 57, 63, 63, 1, 17, 60, 30, 4, 62, 60, 31, 61, 46, 14,
+    60, 39, 30, 57, 17, 29, 3, 28, 6, 42, 24, 47, 7,
+];
+const OCTO_INK_KEY: u8 = 73;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +206,7 @@ pub fn delete_provider(app: &AppHandle, provider_id: String) -> Result<(), Strin
 async fn fetch_managed_provider() -> Result<ManagedProviderPayload, String> {
     reqwest::Client::new()
         .get(WAEY_MANAGED_PROVIDER_ENDPOINT)
+        .header(AUTHORIZATION, managed_provider_gate_header()?)
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -210,6 +216,15 @@ async fn fetch_managed_provider() -> Result<ManagedProviderPayload, String> {
         .json::<ManagedProviderPayload>()
         .await
         .map_err(|error| error.to_string())
+}
+
+fn managed_provider_gate_header() -> Result<HeaderValue, String> {
+    let token = OCTO_INK_DROPS
+        .iter()
+        .map(|byte| char::from(byte ^ OCTO_INK_KEY))
+        .collect::<String>();
+
+    HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| error.to_string())
 }
 
 fn managed_provider_from_payload(payload: ManagedProviderPayload) -> LlmProvider {
@@ -261,9 +276,7 @@ fn current_managed_provider(app: &AppHandle) -> Result<Option<LlmProvider>, Stri
         })
         .map_err(|error| error.to_string())?;
 
-    rows.next()
-        .transpose()
-        .map_err(|error| error.to_string())
+    rows.next().transpose().map_err(|error| error.to_string())
 }
 
 fn save_managed_provider(app: &AppHandle, provider: &LlmProvider) -> Result<(), String> {

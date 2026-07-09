@@ -1,6 +1,8 @@
+import type { AppSettings } from "./types";
+
 export const APP_NAME = "Waey";
 
-export const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: AppSettings = {
   hotkeyOverlay: "Alt+Space",
   hotkeyRegion: "Ctrl+Space",
   theme: "dark",
@@ -10,4 +12,7 @@ export const DEFAULT_SETTINGS = {
   launchOnStartup: false,
   selectedProviderId: "",
   selectedPersonaId: "",
-} as const;
+  developerModeEnabled: false,
+  developerAccessLevel: "assist",
+  developerWorkspaces: [],
+};

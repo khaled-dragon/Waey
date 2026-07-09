@@ -5128,7 +5128,7 @@ dependencies = [
 
 [[package]]
 name = "waey"
-version = "1.3.7"
+version = "1.3.9"
 dependencies = [
  "base64 0.22.1",
  "futures-util",

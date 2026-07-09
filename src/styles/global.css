@@ -577,6 +577,7 @@ body {
   border-top: 1px solid var(--border-sub);
   padding: 7px 9px;
   display: flex; gap: 7px; align-items: flex-end;
+  flex-wrap: wrap;
   background: var(--composer-bg); flex-shrink: 0;
 }
 
@@ -870,6 +871,109 @@ body {
   font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.developer-settings-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-item);
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.developer-toggle-row {
+  border: none;
+  padding: 2px;
+}
+
+.developer-workspaces {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.developer-safety-note {
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 45%, var(--border-sub));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-coral) 9%, var(--bg-surface));
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 8px 9px;
+}
+
+.developer-workspace-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.developer-workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.developer-workspace-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border-sub);
+  border-radius: 7px;
+  padding: 7px 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.developer-workspace-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-access-bar {
+  align-self: stretch;
+  display: flex;
+  flex-basis: 100%;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-sub);
+  border-radius: 7px;
+  background: var(--bg-surface);
+}
+
+.dev-access-pill {
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 4px 7px;
+}
+
+.dev-access-pill--active {
+  background: linear-gradient(90deg, var(--accent-maroon), var(--accent));
+  color: #fff;
+}
+
+.code-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.worked-timer {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin: 2px 0 4px;
 }
 
 @media (max-width: 420px), (max-height: 360px) {

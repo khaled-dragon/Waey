@@ -8,12 +8,14 @@ interface ResponsePanelProps {
   errorMessage: string | null;
   messages: ChatMessage[];
   onEditLastUserMessage: (messageId: string, prompt: string) => Promise<void>;
+  onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
   onRemoveCapture: (path: string) => void;
   streamState: StreamState;
   isRtl: boolean;
+  workedForMs: number | null;
 }
 
-export function ResponsePanel({ capture, captures, errorMessage, messages, onEditLastUserMessage, onRemoveCapture, streamState, isRtl }: ResponsePanelProps) {
+export function ResponsePanel({ capture, captures, errorMessage, messages, onEditLastUserMessage, onApplyDeveloperEdit, onRemoveCapture, streamState, isRtl, workedForMs }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
   const previewItems = captures.map((captureItem) => ({
     capture: captureItem,
@@ -130,7 +132,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
                 </form>
               ) : (
                 <div className="message-bubble">
-                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} reasoningContent={message.reasoningContent} /> : message.content}
+                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} onApplyDeveloperEdit={onApplyDeveloperEdit} reasoningContent={message.reasoningContent} /> : message.content}
                 </div>
               )}
             </div>
@@ -146,12 +148,29 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
               </div>
             </div>
           )}
+          {workedForMs !== null && (
+            <div className="worked-timer">
+              {isRtl ? "عمل لمدة" : "Worked for"} {formatDuration(workedForMs)}
+            </div>
+          )}
           <div ref={bottomRef} />
         </>
         )}
       </div>
     </div>
   );
+}
+
+function formatDuration(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+
+  return `${minutes}m ${seconds}s`;
 }
 
 type MessageSegment =
@@ -161,10 +180,11 @@ type MessageSegment =
 interface FormattedAssistantMessageProps {
   content: string;
   isRtl: boolean;
+  onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
   reasoningContent?: string;
 }
 
-function FormattedAssistantMessage({ content, isRtl, reasoningContent }: FormattedAssistantMessageProps) {
+function FormattedAssistantMessage({ content, isRtl, onApplyDeveloperEdit, reasoningContent }: FormattedAssistantMessageProps) {
   const { answer, thinking } = parseAssistantThinking(content);
   const visibleThinking = reasoningContent?.trim() || thinking;
   const segments = parseMessageSegments(answer);
@@ -174,7 +194,7 @@ function FormattedAssistantMessage({ content, isRtl, reasoningContent }: Formatt
       {visibleThinking.length > 0 && <ThinkingDisclosure content={visibleThinking} isRtl={isRtl} />}
       {segments.map((segment, index) =>
         segment.type === "code" ? (
-          <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} />
+          <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} onApplyDeveloperEdit={onApplyDeveloperEdit} />
         ) : (
           <span key={`${segment.type}-${index}`}>{segment.content}</span>
         ),
@@ -203,11 +223,14 @@ interface CodeBlockProps {
   content: string;
   isRtl: boolean;
   language: string;
+  onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
 }
 
-function CodeBlock({ content, isRtl, language }: CodeBlockProps) {
+function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
+  const [applying, setApplying] = useState(false);
   const label = language || "code";
+  const developerEdit = parseDeveloperEditBlock(language, content);
 
   async function copyCode() {
     try {
@@ -219,17 +242,60 @@ function CodeBlock({ content, isRtl, language }: CodeBlockProps) {
     }
   }
 
+  async function applyDeveloperEdit() {
+    if (!developerEdit) {
+      return;
+    }
+
+    setApplying(true);
+
+    try {
+      await onApplyDeveloperEdit(developerEdit.path, developerEdit.content);
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <div className="code-block">
       <div className="code-block-header">
         <span>{label}</span>
-        <button className="code-copy-btn" onClick={() => void copyCode()} type="button">
-          {copied ? (isRtl ? "تم النسخ" : "Copied") : (isRtl ? "نسخ" : "Copy")}
-        </button>
+        <div className="code-block-actions">
+          {developerEdit && (
+            <button className="code-copy-btn" disabled={applying} onClick={() => void applyDeveloperEdit()} type="button">
+              {applying ? "..." : "Apply"}
+            </button>
+          )}
+          <button className="code-copy-btn" onClick={() => void copyCode()} type="button">
+            {copied ? (isRtl ? "تم النسخ" : "Copied") : (isRtl ? "نسخ" : "Copy")}
+          </button>
+        </div>
       </div>
       <pre className="code-block-body" dir="ltr"><code>{content}</code></pre>
     </div>
   );
+}
+
+function parseDeveloperEditBlock(language: string, content: string) {
+  if (language !== "waey-edit") {
+    return null;
+  }
+
+  const lines = content.split(/\r?\n/);
+  const pathLine = lines[0]?.trim() ?? "";
+
+  if (!pathLine.toLowerCase().startsWith("path:")) {
+    return null;
+  }
+
+  const path = pathLine.slice("path:".length).trim();
+  const replacement = lines.slice(1).join("\n");
+
+  if (!path || !replacement.trim()) {
+    return null;
+  }
+
+  return { path, content: replacement };
 }
 
 function parseMessageSegments(content: string): MessageSegment[] {

@@ -9,6 +9,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import type { PersonaDraft, ProviderDraft } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen } from "./features/capture";
+import { buildDeveloperContext, writeDeveloperFile } from "./features/dev";
 import { useConversationHistory } from "./features/history";
 import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
 import { usePersonas } from "./features/personas";
@@ -36,7 +37,7 @@ function MainOverlay() {
   const { applyManagedUpdate, deleteProvider, dismissManagedUpdate, pendingManagedProviderUpdate, providers, saveProvider, selectedProvider, selectedProviderId, setSelectedProviderId } = useProviders();
   const { deletePersona, personaError, personas, savePersona, selectedPersona, selectedPersonaId, setSelectedPersonaId } = usePersonas();
   const { activeConversationId, conversations, ensureConversation, historyError, loadConversation, messages, pinConversation, persistMessage, removeMessage, removeConversation, renameConversation, setMessages, startNewConversation } = useConversationHistory();
-  const { cancelPrompt, editLastUserMessage, errorMessage, streamState, submitPrompt } = useLlmChat({ ensureConversation, messages, persistMessage, removeMessage, setMessages });
+  const { cancelPrompt, editLastUserMessage, errorMessage, streamState, submitPrompt, workedForMs } = useLlmChat({ ensureConversation, messages, persistMessage, removeMessage, setMessages });
 
   const isRtl = settings.language === "ar";
   const isDark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -127,6 +128,51 @@ function MainOverlay() {
     setCaptureLimitMessage(null);
     setCaptureError(null);
     await captureCurrentScreen().catch(() => undefined);
+  }
+
+  async function submitPromptWithDeveloperContext(prompt: string) {
+    if (!selectedProvider) {
+      setActivePanel("settings");
+      return;
+    }
+
+    setActivePanel("chat");
+
+    let nextPrompt = prompt;
+
+    if (settings.developerModeEnabled) {
+      const approved = settings.developerAccessLevel !== "ask" || window.confirm("Allow Waey to read code context from your allowed workspaces for this prompt?");
+
+      if (approved) {
+        const developerContext = await buildDeveloperContext({
+          approved,
+          prompt,
+          uiContexts: captures
+            .map((capture) => capture.uiContext)
+            .filter((uiContext) => uiContext !== null && uiContext !== undefined),
+        }).catch((error) => {
+          setCaptureError(error instanceof Error ? error.message : String(error));
+          return null;
+        });
+
+        if (developerContext?.content.trim()) {
+          nextPrompt = `${prompt}\n\n${developerContext.content}`;
+        }
+      }
+    }
+
+    return submitPrompt(nextPrompt, selectedProvider, captures, selectedPersona);
+  }
+
+  async function applyDeveloperEdit(path: string, content: string) {
+    const approved = settings.developerAccessLevel === "auto" || window.confirm(`Apply this edit to ${path}?`);
+
+    if (!approved) {
+      return;
+    }
+
+    await writeDeveloperFile(path, content, approved);
+    window.alert("Waey applied the file edit.");
   }
 
   const appWindow = getCurrentWindow();
@@ -257,22 +303,22 @@ function MainOverlay() {
 
                   return editLastUserMessage(messageId, prompt, selectedProvider, selectedPersona);
                 }}
+                onApplyDeveloperEdit={applyDeveloperEdit}
                 onRemoveCapture={removeCapture}
                 streamState={streamState}
                 isRtl={isRtl}
+                workedForMs={workedForMs}
               />
               <ChatComposer
                 onCancelPrompt={cancelPrompt}
-                onSubmitPrompt={(prompt) => {
-                  if (!selectedProvider) {
-                    setActivePanel("settings");
-                    return Promise.resolve();
-                  }
-                  setActivePanel("chat");
-                  return submitPrompt(prompt, selectedProvider, captures, selectedPersona);
-                }}
+                onSubmitPrompt={submitPromptWithDeveloperContext}
                 streamState={streamState}
                 isRtl={isRtl}
+                developerModeEnabled={settings.developerModeEnabled}
+                developerAccessLevel={settings.developerAccessLevel}
+                onChangeDeveloperAccessLevel={(developerAccessLevel) => {
+                  void updateSettings({ ...settings, developerAccessLevel });
+                }}
               />
             </div>
           )}

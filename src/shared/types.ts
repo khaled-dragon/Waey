@@ -57,6 +57,17 @@ export interface AppSettings {
   launchOnStartup: boolean;
   selectedProviderId?: string;
   selectedPersonaId?: string;
+  developerModeEnabled: boolean;
+  developerAccessLevel: DeveloperAccessLevel;
+  developerWorkspaces: string[];
+}
+
+export type DeveloperAccessLevel = "ask" | "assist" | "auto";
+
+export interface DeveloperContextResponse {
+  content: string;
+  filePath?: string | null;
+  warnings: string[];
 }
 
 export type ScreenCaptureSource = "fullScreen" | "region";

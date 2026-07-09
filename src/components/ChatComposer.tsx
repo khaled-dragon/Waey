@@ -1,14 +1,17 @@
 import { useState, type FormEvent } from "react";
-import type { StreamState } from "../shared/types";
+import type { DeveloperAccessLevel, StreamState } from "../shared/types";
 
 interface ChatComposerProps {
   streamState: StreamState;
   onCancelPrompt: () => Promise<void>;
   onSubmitPrompt: (prompt: string) => Promise<void>;
   isRtl: boolean;
+  developerModeEnabled: boolean;
+  developerAccessLevel: DeveloperAccessLevel;
+  onChangeDeveloperAccessLevel: (accessLevel: DeveloperAccessLevel) => void;
 }
 
-export function ChatComposer({ streamState, onCancelPrompt, onSubmitPrompt, isRtl }: ChatComposerProps) {
+export function ChatComposer({ streamState, onCancelPrompt, onSubmitPrompt, isRtl, developerModeEnabled, developerAccessLevel, onChangeDeveloperAccessLevel }: ChatComposerProps) {
   const [prompt, setPrompt] = useState("");
   const isStreaming = streamState === "streaming";
 
@@ -30,6 +33,20 @@ export function ChatComposer({ streamState, onCancelPrompt, onSubmitPrompt, isRt
 
   return (
     <form className="chat-composer" onSubmit={handleSubmit}>
+      {developerModeEnabled && (
+        <div className="dev-access-bar" aria-label="Developer access level">
+          {(["ask", "assist", "auto"] as const).map((accessLevel) => (
+            <button
+              className={`dev-access-pill ${developerAccessLevel === accessLevel ? "dev-access-pill--active" : ""}`}
+              key={accessLevel}
+              onClick={() => onChangeDeveloperAccessLevel(accessLevel)}
+              type="button"
+            >
+              {accessLevel === "ask" ? "Ask" : accessLevel === "assist" ? "Assist" : "Auto"}
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
         className="composer-textarea"
         onChange={(e) => setPrompt(e.currentTarget.value)}
