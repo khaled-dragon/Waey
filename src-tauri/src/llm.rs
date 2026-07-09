@@ -215,7 +215,7 @@ fn request_headers(provider: &LlmProvider) -> Result<reqwest::header::HeaderMap,
 fn chat_request_body(request: &LlmChatRequest) -> Result<Value, String> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached. Wrap code, terminal commands, and config snippets in fenced Markdown code blocks."
+        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached. If developer workspace context is attached in the user message, treat it as visible local file context that you can read, even when no image is attached. Do not ask the user to upload or resend a file that is already included in developer context. For requested file edits, return a fenced `waey-edit` block with `path: ABSOLUTE_FILE_PATH` on the first line and the full replacement file content after it. The `waey-edit` block must not contain explanations, partial snippets, or markdown around the replacement. Wrap ordinary code, terminal commands, and config snippets in fenced Markdown code blocks."
     })];
 
     if let Some(persona_prompt) = persona_system_message(request) {
@@ -365,6 +365,9 @@ fn format_ui_context(index: usize, context: &UiContextSnapshot) -> Option<String
             let value = non_empty(element.value.as_deref())
                 .map(|value| format!(" value=\"{value}\""))
                 .unwrap_or_default();
+            let selected_text = non_empty(element.selected_text.as_deref())
+                .map(|selected_text| format!(" selected=\"{selected_text}\""))
+                .unwrap_or_default();
             let automation_id = non_empty(element.automation_id.as_deref())
                 .map(|automation_id| format!(" id=\"{automation_id}\""))
                 .unwrap_or_default();
@@ -375,11 +378,12 @@ fn format_ui_context(index: usize, context: &UiContextSnapshot) -> Option<String
             };
 
             lines.push(format!(
-                "  {}. {} \"{}\"{}{} at x={}, y={}, w={}, h={}{}",
+                "  {}. {} \"{}\"{}{}{} at x={}, y={}, w={}, h={}{}",
                 element_index + 1,
                 element.role,
                 name,
                 value,
+                selected_text,
                 automation_id,
                 element.bounds.x,
                 element.bounds.y,

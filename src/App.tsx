@@ -6,7 +6,7 @@ import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import type { PersonaDraft, ProviderDraft } from "./shared/types";
+import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen } from "./features/capture";
 import { buildDeveloperContext, writeDeveloperFile } from "./features/dev";
@@ -27,10 +27,12 @@ type Panel = "chat" | "history" | "settings";
 
 function MainOverlay() {
   useOverlayShortcuts();
-  const { captureError, captures, clearCaptures, latestCapture, removeCapture, setCaptureError } = useScreenCaptureEvents();
+  const { captureError, captures, clearCaptures, latestCapture, latestUiContexts, removeCapture, setCaptureError } = useScreenCaptureEvents();
   const [activePanel, setActivePanel] = useState<Panel>("chat");
   const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
   const [showClosePrompt, setShowClosePrompt] = useState(false);
+  const [developerContextStatus, setDeveloperContextStatus] = useState<DeveloperContextStatus | null>(null);
+  const [developerEditStatus, setDeveloperEditStatus] = useState<DeveloperEditStatus | null>(null);
 
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
   const { checkForUpdate, dismissUpdate, installUpdate, updateState } = useAppUpdates();
@@ -138,7 +140,9 @@ function MainOverlay() {
 
     setActivePanel("chat");
 
-    let nextPrompt = prompt;
+    let requestPrompt = prompt;
+    setDeveloperContextStatus(null);
+    setDeveloperEditStatus(null);
 
     if (settings.developerModeEnabled) {
       const approved = settings.developerAccessLevel !== "ask" || window.confirm("Allow Waey to read code context from your allowed workspaces for this prompt?");
@@ -147,21 +151,20 @@ function MainOverlay() {
         const developerContext = await buildDeveloperContext({
           approved,
           prompt,
-          uiContexts: captures
-            .map((capture) => capture.uiContext)
-            .filter((uiContext) => uiContext !== null && uiContext !== undefined),
+          uiContexts: latestUiContexts,
         }).catch((error) => {
           setCaptureError(error instanceof Error ? error.message : String(error));
           return null;
         });
 
         if (developerContext?.content.trim()) {
-          nextPrompt = `${prompt}\n\n${developerContext.content}`;
+          requestPrompt = `${prompt}\n\n${developerContext.content}`;
+          setDeveloperContextStatus(developerContext.status);
         }
       }
     }
 
-    return submitPrompt(nextPrompt, selectedProvider, captures, selectedPersona);
+    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, requestPrompt, latestUiContexts);
   }
 
   async function applyDeveloperEdit(path: string, content: string) {
@@ -171,8 +174,23 @@ function MainOverlay() {
       return;
     }
 
-    await writeDeveloperFile(path, content, approved);
-    window.alert("Waey applied the file edit.");
+    await writeDeveloperFile(path, content, approved)
+      .then(() => {
+        setDeveloperEditStatus({
+          label: "Applied edit",
+          detail: path,
+          kind: "applied",
+        });
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setDeveloperEditStatus({
+          label: "Edit blocked",
+          detail: message,
+          kind: "blocked",
+        });
+        setCaptureError(message);
+      });
   }
 
   const appWindow = getCurrentWindow();
@@ -295,6 +313,8 @@ function MainOverlay() {
                 captures={captures}
                 errorMessage={errorMessage ?? captureError ?? historyError ?? personaError}
                 messages={messages}
+                developerContextStatus={developerContextStatus}
+                developerEditStatus={developerEditStatus}
                 onEditLastUserMessage={(messageId, prompt) => {
                   if (!selectedProvider) {
                     setActivePanel("settings");
@@ -308,6 +328,8 @@ function MainOverlay() {
                 streamState={streamState}
                 isRtl={isRtl}
                 workedForMs={workedForMs}
+                developerModeEnabled={settings.developerModeEnabled}
+                developerAccessLevel={settings.developerAccessLevel}
               />
               <ChatComposer
                 onCancelPrompt={cancelPrompt}

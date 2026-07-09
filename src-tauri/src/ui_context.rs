@@ -34,6 +34,7 @@ pub struct UiElementSummary {
     pub role: String,
     pub name: String,
     pub value: Option<String>,
+    pub selected_text: Option<String>,
     pub automation_id: Option<String>,
     pub bounds: UiContextRect,
     pub focused: bool,
@@ -147,6 +148,7 @@ fn filter_elements(
         .filter(|element| {
             !element.name.trim().is_empty()
                 || element.value.as_deref().unwrap_or("").trim().len() > 1
+                || element.selected_text.as_deref().unwrap_or("").trim().len() > 1
         })
         .filter(|element| element.bounds.width > 0 && element.bounds.height > 0)
         .filter(|element| {
@@ -234,6 +236,27 @@ function Get-SafeValue($element, [string]$role) {
   }
 }
 
+function Get-SelectedText($element, [string]$role) {
+  try {
+    if ($element.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsPasswordProperty)) {
+      return $null
+    }
+  } catch {}
+
+  if ($role -notin @('Edit', 'Document', 'Text')) { return $null }
+
+  try {
+    $textPattern = $element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+    $selection = $textPattern.GetSelection()
+    if ($null -eq $selection -or $selection.Count -eq 0) { return $null }
+
+    $selected = $selection[0].GetText(600)
+    return Clean-Text $selected 600
+  } catch {
+    return $null
+  }
+}
+
 function Convert-Element($element, $cursorX, $cursorY) {
   try {
     if ($element.Current.IsOffscreen) { return $null }
@@ -245,8 +268,9 @@ function Convert-Element($element, $cursorX, $cursorY) {
     $role = Get-ControlTypeName $element
     $name = Clean-Text $element.Current.Name
     $value = Get-SafeValue $element $role
+    $selectedText = Get-SelectedText $element $role
 
-    if ([string]::IsNullOrWhiteSpace($name) -and [string]::IsNullOrWhiteSpace($value)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($name) -and [string]::IsNullOrWhiteSpace($value) -and [string]::IsNullOrWhiteSpace($selectedText)) { return $null }
 
     $automationId = Clean-Text $element.Current.AutomationId 120
     $underCursor = $cursorX -ge $rect.Left -and $cursorX -le $rect.Right -and $cursorY -ge $rect.Top -and $cursorY -le $rect.Bottom
@@ -257,6 +281,7 @@ function Convert-Element($element, $cursorX, $cursorY) {
       role = $role
       name = if ($name) { $name } else { '' }
       value = $value
+      selectedText = $selectedText
       automationId = $automationId
       bounds = [PSCustomObject]@{
         x = [int][Math]::Round($rect.Left)

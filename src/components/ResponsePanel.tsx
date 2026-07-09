@@ -1,21 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { capturePreviewUrl } from "../features/capture";
-import type { ChatMessage, ScreenCapture, StreamState } from "../shared/types";
+import type { ChatMessage, DeveloperAccessLevel, DeveloperContextStatus, DeveloperEditStatus, ScreenCapture, StreamState } from "../shared/types";
 
 interface ResponsePanelProps {
   capture: ScreenCapture | null;
   captures: ScreenCapture[];
   errorMessage: string | null;
   messages: ChatMessage[];
+  developerContextStatus: DeveloperContextStatus | null;
+  developerEditStatus: DeveloperEditStatus | null;
   onEditLastUserMessage: (messageId: string, prompt: string) => Promise<void>;
   onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
   onRemoveCapture: (path: string) => void;
   streamState: StreamState;
   isRtl: boolean;
   workedForMs: number | null;
+  developerModeEnabled: boolean;
+  developerAccessLevel: DeveloperAccessLevel;
 }
 
-export function ResponsePanel({ capture, captures, errorMessage, messages, onEditLastUserMessage, onApplyDeveloperEdit, onRemoveCapture, streamState, isRtl, workedForMs }: ResponsePanelProps) {
+export function ResponsePanel({ capture, captures, errorMessage, messages, developerContextStatus, developerEditStatus, onEditLastUserMessage, onApplyDeveloperEdit, onRemoveCapture, streamState, isRtl, workedForMs, developerModeEnabled, developerAccessLevel }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
   const previewItems = captures.map((captureItem) => ({
     capture: captureItem,
@@ -24,6 +28,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
+  const appliedDeveloperEditsRef = useRef<Set<string>>(new Set());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const lastAssistantMessage = messages.slice().reverse().find((m: ChatMessage) => m.role === "assistant") ?? null;
@@ -36,6 +41,31 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, streamState]);
+
+  useEffect(() => {
+    if (!developerModeEnabled || developerAccessLevel !== "auto" || streamState === "streaming") {
+      return;
+    }
+
+    const lastAssistant = messages.slice().reverse().find((message) => message.role === "assistant");
+
+    if (!lastAssistant?.content.trim()) {
+      return;
+    }
+
+    const developerEdits = parseDeveloperEditBlocks(lastAssistant.content);
+
+    for (const edit of developerEdits) {
+      const editKey = `${lastAssistant.id}:${edit.path}:${edit.content.length}`;
+
+      if (appliedDeveloperEditsRef.current.has(editKey)) {
+        continue;
+      }
+
+      appliedDeveloperEditsRef.current.add(editKey);
+      void onApplyDeveloperEdit(edit.path, edit.content);
+    }
+  }, [developerAccessLevel, developerModeEnabled, messages, onApplyDeveloperEdit, streamState]);
 
   function handleScroll() {
     const container = scrollContainerRef.current;
@@ -89,6 +119,16 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, onEdi
             </div>
           )}
           {previewItems.length > 0 && <CapturePreviewStrip isRtl={isRtl} items={previewItems} onRemoveCapture={onRemoveCapture} />}
+          {(developerContextStatus || developerEditStatus) && (
+            <div className="developer-status-stack">
+              {developerContextStatus && (
+                <DeveloperStatusChip detail={developerContextStatus.detail} kind={developerContextStatus.kind} label={developerContextStatus.label} />
+              )}
+              {developerEditStatus && (
+                <DeveloperStatusChip detail={developerEditStatus.detail} kind={developerEditStatus.kind} label={developerEditStatus.label} />
+              )}
+            </div>
+          )}
           {messages.map((message) => (
             <div key={message.id} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
               <div className="message-role">
@@ -176,6 +216,21 @@ function formatDuration(durationMs: number) {
 type MessageSegment =
   | { type: "text"; content: string }
   | { type: "code"; content: string; language: string };
+
+interface DeveloperStatusChipProps {
+  detail: string;
+  kind: "attached" | "warning" | "applied" | "blocked";
+  label: string;
+}
+
+function DeveloperStatusChip({ detail, kind, label }: DeveloperStatusChipProps) {
+  return (
+    <div className={`developer-status-chip developer-status-chip--${kind}`}>
+      <span>{label}</span>
+      <small>{detail}</small>
+    </div>
+  );
+}
 
 interface FormattedAssistantMessageProps {
   content: string;
@@ -296,6 +351,22 @@ function parseDeveloperEditBlock(language: string, content: string) {
   }
 
   return { path, content: replacement };
+}
+
+function parseDeveloperEditBlocks(content: string) {
+  const edits: Array<{ path: string; content: string }> = [];
+  const codeBlockPattern = /```waey-edit\n?([\s\S]*?)```/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockPattern.exec(content)) !== null) {
+    const edit = parseDeveloperEditBlock("waey-edit", match[1] ?? "");
+
+    if (edit) {
+      edits.push(edit);
+    }
+  }
+
+  return edits;
 }
 
 function parseMessageSegments(content: string): MessageSegment[] {

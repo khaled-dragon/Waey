@@ -9,6 +9,7 @@ use tauri::AppHandle;
 const MAX_SEARCH_ENTRIES: usize = 8_000;
 const MAX_ATTACHED_LINES: usize = 220;
 const MAX_ATTACHED_BYTES: usize = 28_000;
+const CONTEXT_RADIUS_LINES: usize = 110;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,7 +24,23 @@ pub struct DeveloperContextRequest {
 pub struct DeveloperContextResponse {
     pub content: String,
     pub file_path: Option<String>,
+    pub status: DeveloperContextStatus,
     pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeveloperContextStatus {
+    pub label: String,
+    pub detail: String,
+    pub kind: DeveloperContextStatusKind,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeveloperContextStatusKind {
+    Attached,
+    Warning,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -57,6 +74,8 @@ pub fn build_developer_context(
 
     let mut warnings = Vec::new();
     let active_title = active_window_title(&request.ui_contexts);
+    let selected_text = selected_text_from_contexts(&request.ui_contexts);
+    let requested_line = requested_line_number(&request.prompt);
     let candidate_name = active_file_candidate(
         &request.prompt,
         active_title.as_deref(),
@@ -65,8 +84,18 @@ pub fn build_developer_context(
 
     let Some(candidate_name) = candidate_name else {
         return Ok(Some(DeveloperContextResponse {
-            content: developer_context_header(active_title.as_deref(), None, &warnings),
+            content: developer_context_header(
+                active_title.as_deref(),
+                None,
+                selected_text.as_deref(),
+                &warnings,
+            ),
             file_path: None,
+            status: DeveloperContextStatus {
+                label: "No file matched".to_string(),
+                detail: "Waey could not detect an active code file from this screen.".to_string(),
+                kind: DeveloperContextStatusKind::Warning,
+            },
             warnings,
         }));
     };
@@ -78,16 +107,31 @@ pub fn build_developer_context(
         ));
 
         return Ok(Some(DeveloperContextResponse {
-            content: developer_context_header(active_title.as_deref(), None, &warnings),
+            content: developer_context_header(
+                active_title.as_deref(),
+                None,
+                selected_text.as_deref(),
+                &warnings,
+            ),
             file_path: None,
+            status: DeveloperContextStatus {
+                label: "No workspace file matched".to_string(),
+                detail: format!("Could not find `{candidate_name}` inside allowed workspaces."),
+                kind: DeveloperContextStatusKind::Warning,
+            },
             warnings,
         }));
     };
 
-    let attachment = read_file_attachment(&matched_path)?;
+    let attachment = read_file_attachment(&matched_path, requested_line, selected_text.as_deref())?;
     let content = format!(
         "{}\n\nMatched file: {}\nAttached lines: {}-{} of {}\n\n```{}\n{}\n```",
-        developer_context_header(active_title.as_deref(), Some(&matched_path), &warnings),
+        developer_context_header(
+            active_title.as_deref(),
+            Some(&matched_path),
+            selected_text.as_deref(),
+            &warnings,
+        ),
         matched_path.display(),
         attachment.start_line,
         attachment.end_line,
@@ -99,6 +143,19 @@ pub fn build_developer_context(
     Ok(Some(DeveloperContextResponse {
         content,
         file_path: Some(matched_path.to_string_lossy().to_string()),
+        status: DeveloperContextStatus {
+            label: "Code context attached".to_string(),
+            detail: format!(
+                "{} lines {}-{}",
+                matched_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("workspace file"),
+                attachment.start_line,
+                attachment.end_line
+            ),
+            kind: DeveloperContextStatusKind::Attached,
+        },
         warnings,
     }))
 }
@@ -123,7 +180,7 @@ pub fn write_developer_file(
     }
 
     let workspaces = normalized_workspaces(&settings.developer_workspaces)?;
-    let target_path = fs::canonicalize(request.path.trim())
+    let target_path = fs::canonicalize(clean_path_input(&request.path))
         .map_err(|error| format!("Failed to resolve target file: {error}"))?;
 
     if !target_path.is_file() {
@@ -180,6 +237,22 @@ fn active_window_title(contexts: &[UiContextSnapshot]) -> Option<String> {
     })
 }
 
+fn selected_text_from_contexts(contexts: &[UiContextSnapshot]) -> Option<String> {
+    contexts
+        .iter()
+        .flat_map(|context| context.elements.iter())
+        .find(|element| element.focused || element.under_cursor)
+        .and_then(|element| non_empty(element.selected_text.as_deref()))
+        .map(ToString::to_string)
+        .or_else(|| {
+            contexts
+                .iter()
+                .flat_map(|context| context.elements.iter())
+                .find_map(|element| non_empty(element.selected_text.as_deref()))
+                .map(ToString::to_string)
+        })
+}
+
 fn active_file_candidate(
     prompt: &str,
     title: Option<&str>,
@@ -194,6 +267,9 @@ fn active_file_candidate(
                 .filter_map(|element| {
                     candidate_from_text(&element.name)
                         .or_else(|| candidate_from_text(element.value.as_deref().unwrap_or("")))
+                        .or_else(|| {
+                            candidate_from_text(element.selected_text.as_deref().unwrap_or(""))
+                        })
                 })
                 .next()
         })
@@ -337,7 +413,11 @@ struct FileAttachment {
     total_lines: usize,
 }
 
-fn read_file_attachment(path: &Path) -> Result<FileAttachment, String> {
+fn read_file_attachment(
+    path: &Path,
+    requested_line: Option<usize>,
+    selected_text: Option<&str>,
+) -> Result<FileAttachment, String> {
     if is_secret_path(path) {
         return Err("Waey will not read secret-like files.".to_string());
     }
@@ -351,10 +431,21 @@ fn read_file_attachment(path: &Path) -> Result<FileAttachment, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let lines = text.lines().collect::<Vec<_>>();
     let total_lines = lines.len().max(1);
+    let focus_line = requested_line
+        .filter(|line| *line > 0)
+        .or_else(|| selected_text.and_then(|selected| find_selected_text_line(&lines, selected)));
+    let start_index = focus_line
+        .map(|line| line.saturating_sub(CONTEXT_RADIUS_LINES + 1))
+        .unwrap_or(0);
     let mut content = String::new();
-    let mut end_line = 0usize;
+    let mut end_line = start_index;
 
-    for (index, line) in lines.iter().take(MAX_ATTACHED_LINES).enumerate() {
+    for (index, line) in lines
+        .iter()
+        .enumerate()
+        .skip(start_index)
+        .take(MAX_ATTACHED_LINES)
+    {
         if content.len() + line.len() + 1 > MAX_ATTACHED_BYTES {
             break;
         }
@@ -366,8 +457,8 @@ fn read_file_attachment(path: &Path) -> Result<FileAttachment, String> {
 
     Ok(FileAttachment {
         content: content.trim_end().to_string(),
-        start_line: 1,
-        end_line: end_line.max(1),
+        start_line: start_index + 1,
+        end_line: end_line.max(start_index + 1),
         total_lines,
     })
 }
@@ -375,12 +466,17 @@ fn read_file_attachment(path: &Path) -> Result<FileAttachment, String> {
 fn developer_context_header(
     active_title: Option<&str>,
     file_path: Option<&Path>,
+    selected_text: Option<&str>,
     warnings: &[String],
 ) -> String {
     let mut lines = vec![
-        "Developer context from allowed local workspaces.".to_string(),
-        "Use this as supporting code context. Do not claim you changed files unless Waey explicitly confirms an edit.".to_string(),
-        "If the user asks for a file edit, return the full replacement in a fenced `waey-edit` block. The first line must be `path: ABSOLUTE_FILE_PATH`.".to_string(),
+        "Developer workspace context is attached below. You can read this file context even when no screenshot is attached.".to_string(),
+        "Do not say you cannot see the file if a matched file and code block are included in this context.".to_string(),
+        "Use this context as the source of truth for code questions. If the user asks for a code edit, return a concise answer plus a fenced `waey-edit` block.".to_string(),
+        "A `waey-edit` block must contain a full replacement for the target file. The first line must be `path: ABSOLUTE_FILE_PATH`.".to_string(),
+        "When returning `waey-edit`, do not put partial snippets, explanations, or markdown inside the block. Only the path line followed by the complete file content.".to_string(),
+        "If the user asks to fix the selected line or a specific line number, use the focused text or attached line range to infer the exact change.".to_string(),
+        "Waey may apply valid `waey-edit` blocks after checking workspace safety. Do not include destructive changes unless the user explicitly asked for them.".to_string(),
     ];
 
     if let Some(title) = non_empty(active_title) {
@@ -391,12 +487,52 @@ fn developer_context_header(
         lines.push(format!("Workspace file: {}", path.display()));
     }
 
+    if let Some(selected_text) = non_empty(selected_text) {
+        lines.push(format!("Focused or selected text: {selected_text}"));
+    }
+
     if !warnings.is_empty() {
         lines.push("Warnings:".to_string());
         lines.extend(warnings.iter().map(|warning| format!("- {warning}")));
     }
 
     lines.join("\n")
+}
+
+fn requested_line_number(prompt: &str) -> Option<usize> {
+    let lower_prompt = prompt.to_ascii_lowercase();
+    let markers = ["line", "السطر", "سطر", "l"];
+
+    for marker in markers {
+        let Some(index) = lower_prompt.find(marker) else {
+            continue;
+        };
+        let after_marker = &lower_prompt[index + marker.len()..];
+        let digits = after_marker
+            .chars()
+            .skip_while(|character| !character.is_ascii_digit())
+            .take_while(|character| character.is_ascii_digit())
+            .collect::<String>();
+
+        if let Ok(line) = digits.parse::<usize>() {
+            return Some(line);
+        }
+    }
+
+    None
+}
+
+fn find_selected_text_line(lines: &[&str], selected_text: &str) -> Option<usize> {
+    let needle = selected_text.trim();
+
+    if needle.is_empty() {
+        return None;
+    }
+
+    lines
+        .iter()
+        .position(|line| line.contains(needle))
+        .map(|index| index + 1)
 }
 
 fn should_skip_path(path: &Path) -> bool {

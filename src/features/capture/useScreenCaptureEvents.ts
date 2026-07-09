@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
-import type { ScreenCapture, ScreenCaptureError } from "../../shared/types";
+import type { ScreenCapture, ScreenCaptureError, UiContextSnapshot } from "../../shared/types";
 
 const CAPTURE_READY_EVENT = "capture-ready";
 const CAPTURE_ERROR_EVENT = "capture-error";
@@ -9,6 +9,7 @@ const MAX_SCREEN_CAPTURES = 3;
 export function useScreenCaptureEvents() {
   const [captures, setCaptures] = useState<ScreenCapture[]>([]);
   const [latestCapture, setLatestCapture] = useState<ScreenCapture | null>(null);
+  const [latestUiContexts, setLatestUiContexts] = useState<UiContextSnapshot[]>([]);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -18,9 +19,14 @@ export function useScreenCaptureEvents() {
     const pendingListeners = [
       listen<ScreenCapture>(CAPTURE_READY_EVENT, (event) => {
         if (isMounted) {
+          const capturedUiContext = event.payload.uiContext;
+
           setCaptures((currentCaptures) => {
             const nextCaptures = [...currentCaptures, event.payload].slice(-MAX_SCREEN_CAPTURES);
             setLatestCapture(nextCaptures[nextCaptures.length - 1] ?? null);
+            if (capturedUiContext) {
+              setLatestUiContexts((currentContexts) => [...currentContexts, capturedUiContext].slice(-MAX_SCREEN_CAPTURES));
+            }
             return nextCaptures;
           });
           setCaptureError(null);
@@ -59,7 +65,8 @@ export function useScreenCaptureEvents() {
   const clearCaptures = useCallback(() => {
     setCaptures([]);
     setLatestCapture(null);
+    setLatestUiContexts([]);
   }, []);
 
-  return { captureError, captures, clearCaptures, latestCapture, removeCapture, setCaptureError, setCaptures, setLatestCapture };
+  return { captureError, captures, clearCaptures, latestCapture, latestUiContexts, removeCapture, setCaptureError, setCaptures, setLatestCapture };
 }

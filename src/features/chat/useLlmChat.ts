@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import type { ChatMessage, LlmProvider, Persona, ScreenCapture, StreamState } from "../../shared/types";
+import type { ChatMessage, LlmProvider, Persona, ScreenCapture, StreamState, UiContextSnapshot } from "../../shared/types";
 import { cancelLlmPrompt, sendLlmPrompt } from "./chatCommands";
 
 interface UseLlmChatOptions {
@@ -50,10 +50,13 @@ export function useLlmChat({
       provider: LlmProvider | null,
       captures: ScreenCapture[],
       persona: Persona | null,
+      requestPrompt?: string,
+      uiContexts?: UiContextSnapshot[],
     ) => {
       const trimmedPrompt = prompt.trim();
+      const trimmedRequestPrompt = (requestPrompt ?? prompt).trim();
 
-      if (!trimmedPrompt) {
+      if (!trimmedPrompt || !trimmedRequestPrompt) {
         return;
       }
 
@@ -98,9 +101,10 @@ export function useLlmChat({
         await persistMessage(userMessage, conversationId);
         await sendLlmPrompt({
           provider,
-          prompt: trimmedPrompt,
+          prompt: trimmedRequestPrompt,
           capture: captures[0] ?? null,
           captures,
+          uiContexts,
           persona,
           requestId,
           historyMessages,

@@ -67,7 +67,20 @@ export type DeveloperAccessLevel = "ask" | "assist" | "auto";
 export interface DeveloperContextResponse {
   content: string;
   filePath?: string | null;
+  status: DeveloperContextStatus;
   warnings: string[];
+}
+
+export interface DeveloperContextStatus {
+  label: string;
+  detail: string;
+  kind: "attached" | "warning";
+}
+
+export interface DeveloperEditStatus {
+  label: string;
+  detail: string;
+  kind: "applied" | "blocked";
 }
 
 export type ScreenCaptureSource = "fullScreen" | "region";
@@ -96,6 +109,7 @@ export interface UiElementSummary {
   role: string;
   name: string;
   value?: string | null;
+  selectedText?: string | null;
   automationId?: string | null;
   bounds: CaptureRect;
   focused: boolean;
