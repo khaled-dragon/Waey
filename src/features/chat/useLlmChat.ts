@@ -127,10 +127,13 @@ export function useLlmChat({
       prompt: string,
       provider: LlmProvider | null,
       persona: Persona | null,
+      requestPrompt?: string,
+      uiContexts?: UiContextSnapshot[],
     ) => {
       const trimmedPrompt = prompt.trim();
+      const trimmedRequestPrompt = (requestPrompt ?? prompt).trim();
 
-      if (streamState === "streaming" || !trimmedPrompt) {
+      if (streamState === "streaming" || !trimmedPrompt || !trimmedRequestPrompt) {
         return;
       }
 
@@ -217,10 +220,11 @@ export function useLlmChat({
 
         await sendLlmPrompt({
           provider,
-          prompt: trimmedPrompt,
+          prompt: trimmedRequestPrompt,
           capture: null,
           capturePath: editedUserMessage.capturePath ?? null,
           capturePaths: editedUserMessage.capturePaths ?? [],
+          uiContexts,
           persona,
           requestId,
           historyMessages,

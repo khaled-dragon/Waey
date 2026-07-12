@@ -75,6 +75,16 @@ export interface DeveloperContextStatus {
   label: string;
   detail: string;
   kind: "attached" | "warning";
+  filePath?: string | null;
+  activeWindowTitle?: string | null;
+  lineRange?: DeveloperLineRange | null;
+  warnings: string[];
+}
+
+export interface DeveloperLineRange {
+  start: number;
+  end: number;
+  total: number;
 }
 
 export interface DeveloperEditStatus {

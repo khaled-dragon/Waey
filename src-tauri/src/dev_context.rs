@@ -34,6 +34,10 @@ pub struct DeveloperContextStatus {
     pub label: String,
     pub detail: String,
     pub kind: DeveloperContextStatusKind,
+    pub file_path: Option<String>,
+    pub active_window_title: Option<String>,
+    pub line_range: Option<DeveloperLineRange>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -41,6 +45,14 @@ pub struct DeveloperContextStatus {
 pub enum DeveloperContextStatusKind {
     Attached,
     Warning,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeveloperLineRange {
+    pub start: usize,
+    pub end: usize,
+    pub total: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -76,52 +88,86 @@ pub fn build_developer_context(
     let active_title = active_window_title(&request.ui_contexts);
     let selected_text = selected_text_from_contexts(&request.ui_contexts);
     let requested_line = requested_line_number(&request.prompt);
-    let candidate_name = active_file_candidate(
+    let candidates = file_candidates(
         &request.prompt,
         active_title.as_deref(),
         &request.ui_contexts,
     );
 
-    let Some(candidate_name) = candidate_name else {
+    if candidates.is_empty() {
         return Ok(Some(DeveloperContextResponse {
             content: developer_context_header(
                 active_title.as_deref(),
+                None,
                 None,
                 selected_text.as_deref(),
                 &warnings,
             ),
             file_path: None,
-            status: DeveloperContextStatus {
-                label: "No file matched".to_string(),
-                detail: "Waey could not detect an active code file from this screen.".to_string(),
-                kind: DeveloperContextStatusKind::Warning,
-            },
+            status: developer_status(
+                "No file matched",
+                "Waey could not detect an active code file from this screen.",
+                DeveloperContextStatusKind::Warning,
+                None,
+                active_title.as_deref(),
+                None,
+                &warnings,
+            ),
             warnings,
         }));
     };
 
-    let matched_path = find_file_in_workspaces(&candidate_name, &workspaces, &mut warnings)?;
+    let mut matched_path = None;
+    let mut matched_candidate = None;
+
+    for candidate in &candidates {
+        if let Some(path) = find_file_in_workspaces(candidate, &workspaces, &mut warnings)? {
+            matched_candidate = Some(candidate.clone());
+            matched_path = Some(path);
+            break;
+        }
+    }
+
     let Some(matched_path) = matched_path else {
         warnings.push(format!(
-            "Waey could not find `{candidate_name}` inside the allowed workspaces."
+            "Waey could not find any of these files inside the allowed workspaces: {}.",
+            candidates.join(", ")
         ));
 
         return Ok(Some(DeveloperContextResponse {
             content: developer_context_header(
                 active_title.as_deref(),
                 None,
+                None,
                 selected_text.as_deref(),
                 &warnings,
             ),
             file_path: None,
-            status: DeveloperContextStatus {
-                label: "No workspace file matched".to_string(),
-                detail: format!("Could not find `{candidate_name}` inside allowed workspaces."),
-                kind: DeveloperContextStatusKind::Warning,
-            },
+            status: developer_status(
+                "No workspace file matched",
+                "Could not find a requested code file inside allowed workspaces.",
+                DeveloperContextStatusKind::Warning,
+                None,
+                active_title.as_deref(),
+                None,
+                &warnings,
+            ),
             warnings,
         }));
     };
+
+    if candidates.len() > 1 {
+        warnings.push(format!(
+            "Waey detected multiple possible files and attached `{}`.",
+            matched_candidate.unwrap_or_else(|| {
+                matched_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("workspace file")
+                    .to_string()
+            })
+        ));
+    }
 
     let attachment = read_file_attachment(&matched_path, requested_line, selected_text.as_deref())?;
     let content = format!(
@@ -129,6 +175,7 @@ pub fn build_developer_context(
         developer_context_header(
             active_title.as_deref(),
             Some(&matched_path),
+            Some(&attachment),
             selected_text.as_deref(),
             &warnings,
         ),
@@ -143,9 +190,9 @@ pub fn build_developer_context(
     Ok(Some(DeveloperContextResponse {
         content,
         file_path: Some(matched_path.to_string_lossy().to_string()),
-        status: DeveloperContextStatus {
-            label: "Code context attached".to_string(),
-            detail: format!(
+        status: developer_status(
+            "Code context attached",
+            &format!(
                 "{} lines {}-{}",
                 matched_path
                     .file_name()
@@ -154,8 +201,12 @@ pub fn build_developer_context(
                 attachment.start_line,
                 attachment.end_line
             ),
-            kind: DeveloperContextStatusKind::Attached,
-        },
+            DeveloperContextStatusKind::Attached,
+            Some(&matched_path),
+            active_title.as_deref(),
+            Some(&attachment),
+            &warnings,
+        ),
         warnings,
     }))
 }
@@ -180,25 +231,68 @@ pub fn write_developer_file(
     }
 
     let workspaces = normalized_workspaces(&settings.developer_workspaces)?;
-    let target_path = fs::canonicalize(clean_path_input(&request.path))
-        .map_err(|error| format!("Failed to resolve target file: {error}"))?;
-
-    if !target_path.is_file() {
-        return Err("Waey can only edit existing files.".to_string());
-    }
+    let requested_path = PathBuf::from(clean_path_input(&request.path));
+    let target_path = resolve_write_target(&requested_path, &workspaces)?;
 
     if is_secret_path(&target_path) {
         return Err("Waey will not edit secret-like files.".to_string());
     }
 
-    if !workspaces
-        .iter()
-        .any(|workspace| target_path.starts_with(workspace))
-    {
-        return Err("Target file is outside the allowed workspaces.".to_string());
+    if !looks_like_code_file(&target_path.to_string_lossy()) {
+        return Err("Waey can only write developer text/code files.".to_string());
     }
 
     fs::write(&target_path, request.content).map_err(|error| error.to_string())
+}
+
+fn resolve_write_target(requested_path: &Path, workspaces: &[PathBuf]) -> Result<PathBuf, String> {
+    if requested_path.as_os_str().is_empty() {
+        return Err("Target file path is required.".to_string());
+    }
+
+    if requested_path.exists() {
+        let target_path = fs::canonicalize(requested_path)
+            .map_err(|error| format!("Failed to resolve target file: {error}"))?;
+
+        if !target_path.is_file() {
+            return Err("Target path is not a file.".to_string());
+        }
+
+        if !workspaces
+            .iter()
+            .any(|workspace| target_path.starts_with(workspace))
+        {
+            return Err("Target file is outside the allowed workspaces.".to_string());
+        }
+
+        return Ok(target_path);
+    }
+
+    let parent = requested_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| {
+            "New files must include a parent folder inside an allowed workspace.".to_string()
+        })?;
+    let parent = fs::canonicalize(parent)
+        .map_err(|error| format!("Failed to resolve target folder: {error}"))?;
+
+    if !parent.is_dir() {
+        return Err("Target parent is not a folder.".to_string());
+    }
+
+    if !workspaces
+        .iter()
+        .any(|workspace| parent.starts_with(workspace))
+    {
+        return Err("Target folder is outside the allowed workspaces.".to_string());
+    }
+
+    let file_name = requested_path
+        .file_name()
+        .ok_or_else(|| "New file path is missing a file name.".to_string())?;
+
+    Ok(parent.join(file_name))
 }
 
 fn normalized_workspaces(values: &[String]) -> Result<Vec<PathBuf>, String> {
@@ -253,30 +347,55 @@ fn selected_text_from_contexts(contexts: &[UiContextSnapshot]) -> Option<String>
         })
 }
 
-fn active_file_candidate(
+fn file_candidates(
     prompt: &str,
     title: Option<&str>,
     contexts: &[UiContextSnapshot],
-) -> Option<String> {
-    title
-        .and_then(candidate_from_text)
-        .or_else(|| {
-            contexts
-                .iter()
-                .flat_map(|context| context.elements.iter())
-                .filter_map(|element| {
-                    candidate_from_text(&element.name)
-                        .or_else(|| candidate_from_text(element.value.as_deref().unwrap_or("")))
-                        .or_else(|| {
-                            candidate_from_text(element.selected_text.as_deref().unwrap_or(""))
-                        })
-                })
-                .next()
-        })
-        .or_else(|| candidate_from_text(prompt))
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    push_candidates(&mut candidates, prompt);
+
+    if let Some(title) = title {
+        push_candidates(&mut candidates, title);
+    }
+
+    for element in contexts.iter().flat_map(|context| context.elements.iter()) {
+        if element.focused || element.under_cursor {
+            push_candidates(&mut candidates, &element.name);
+            push_candidates(&mut candidates, element.value.as_deref().unwrap_or(""));
+            push_candidates(
+                &mut candidates,
+                element.selected_text.as_deref().unwrap_or(""),
+            );
+        }
+    }
+
+    for element in contexts.iter().flat_map(|context| context.elements.iter()) {
+        push_candidates(&mut candidates, &element.name);
+        push_candidates(&mut candidates, element.value.as_deref().unwrap_or(""));
+        push_candidates(
+            &mut candidates,
+            element.selected_text.as_deref().unwrap_or(""),
+        );
+    }
+
+    candidates.truncate(8);
+    candidates
 }
 
-fn candidate_from_text(text: &str) -> Option<String> {
+fn push_candidates(candidates: &mut Vec<String>, text: &str) {
+    for candidate in candidates_from_text(text) {
+        if !candidates
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+        {
+            candidates.push(candidate);
+        }
+    }
+}
+
+fn candidates_from_text(text: &str) -> Vec<String> {
     let separators = [
         " - Visual Studio Code",
         " - Cursor",
@@ -291,22 +410,38 @@ fn candidate_from_text(text: &str) -> Option<String> {
         }
     }
 
-    cleaned
-        .split([' ', '\n', '\t', '"', '\'', '`', ':', '|', '/', '\\'])
-        .map(|part| {
-            part.trim_matches(|character: char| {
-                character == ',' || character == ';' || character == ')' || character == '('
-            })
+    let mut candidates = Vec::new();
+
+    for part in cleaned
+        .split([
+            '\n', '\t', '"', '\'', '`', '|', '<', '>', '[', ']', '(', ')',
+        ])
+        .flat_map(|part| part.split_whitespace())
+        .flat_map(|part| part.split(" - "))
+        .map(clean_candidate_token)
+        .filter(|part| looks_like_code_file(part))
+    {
+        if !candidates
+            .iter()
+            .any(|candidate: &String| candidate.eq_ignore_ascii_case(&part))
+        {
+            candidates.push(part);
+        }
+    }
+
+    candidates
+}
+
+fn clean_candidate_token(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|character: char| {
+            matches!(
+                character,
+                ',' | ';' | ':' | '.' | '!' | '?' | '"' | '\'' | '`'
+            )
         })
-        .find(|part| looks_like_code_file(part))
-        .map(ToString::to_string)
-        .or_else(|| {
-            cleaned
-                .split(" - ")
-                .map(str::trim)
-                .find(|part| looks_like_code_file(part))
-                .map(ToString::to_string)
-        })
+        .to_string()
 }
 
 fn looks_like_code_file(value: &str) -> bool {
@@ -339,6 +474,32 @@ fn looks_like_code_file(value: &str) -> bool {
             | "yaml"
             | "yml"
             | "sql"
+            | "vue"
+            | "svelte"
+            | "astro"
+            | "php"
+            | "rb"
+            | "swift"
+            | "kt"
+            | "kts"
+            | "dart"
+            | "sh"
+            | "ps1"
+            | "lua"
+            | "r"
+            | "ex"
+            | "exs"
+            | "scala"
+            | "pl"
+            | "pm"
+            | "fs"
+            | "fsx"
+            | "clj"
+            | "cljs"
+            | "erl"
+            | "hrl"
+            | "zig"
+            | "dockerfile"
     )
 }
 
@@ -347,12 +508,13 @@ fn find_file_in_workspaces(
     workspaces: &[PathBuf],
     warnings: &mut Vec<String>,
 ) -> Result<Option<PathBuf>, String> {
+    let normalized_candidate = file_name.replace('\\', "/").to_ascii_lowercase();
     let target_name = Path::new(file_name)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(file_name)
         .to_ascii_lowercase();
-    let mut matches = Vec::new();
+    let mut matches: Vec<(usize, PathBuf)> = Vec::new();
     let mut scanned = 0usize;
 
     for workspace in workspaces {
@@ -362,7 +524,8 @@ fn find_file_in_workspaces(
             if scanned >= MAX_SEARCH_ENTRIES {
                 warnings
                     .push("Workspace search stopped early to keep Waey responsive.".to_string());
-                return Ok(matches.into_iter().next());
+                matches.sort_by_key(|(score, path)| (*score, path.components().count()));
+                return Ok(matches.into_iter().map(|(_, path)| path).next());
             }
 
             scanned += 1;
@@ -389,8 +552,25 @@ fn find_file_in_workspaces(
                 continue;
             };
 
-            if name.eq_ignore_ascii_case(&target_name) && !is_secret_path(&path) {
-                matches.push(path);
+            if is_secret_path(&path) {
+                continue;
+            }
+
+            let relative_path = workspace
+                .strip_prefix(workspace)
+                .ok()
+                .and_then(|_| path.strip_prefix(workspace).ok())
+                .map(|path| {
+                    path.to_string_lossy()
+                        .replace('\\', "/")
+                        .to_ascii_lowercase()
+                })
+                .unwrap_or_default();
+
+            if relative_path.ends_with(&normalized_candidate) {
+                matches.push((0, path));
+            } else if name.eq_ignore_ascii_case(&target_name) {
+                matches.push((1, path));
             }
         }
     }
@@ -402,8 +582,8 @@ fn find_file_in_workspaces(
         ));
     }
 
-    matches.sort_by_key(|path| path.components().count());
-    Ok(matches.into_iter().next())
+    matches.sort_by_key(|(score, path)| (*score, path.components().count()));
+    Ok(matches.into_iter().map(|(_, path)| path).next())
 }
 
 struct FileAttachment {
@@ -466,18 +646,11 @@ fn read_file_attachment(
 fn developer_context_header(
     active_title: Option<&str>,
     file_path: Option<&Path>,
+    attachment: Option<&FileAttachment>,
     selected_text: Option<&str>,
     warnings: &[String],
 ) -> String {
-    let mut lines = vec![
-        "Developer workspace context is attached below. You can read this file context even when no screenshot is attached.".to_string(),
-        "Do not say you cannot see the file if a matched file and code block are included in this context.".to_string(),
-        "Use this context as the source of truth for code questions. If the user asks for a code edit, return a concise answer plus a fenced `waey-edit` block.".to_string(),
-        "A `waey-edit` block must contain a full replacement for the target file. The first line must be `path: ABSOLUTE_FILE_PATH`.".to_string(),
-        "When returning `waey-edit`, do not put partial snippets, explanations, or markdown inside the block. Only the path line followed by the complete file content.".to_string(),
-        "If the user asks to fix the selected line or a specific line number, use the focused text or attached line range to infer the exact change.".to_string(),
-        "Waey may apply valid `waey-edit` blocks after checking workspace safety. Do not include destructive changes unless the user explicitly asked for them.".to_string(),
-    ];
+    let mut lines = vec!["Developer workspace context attached.".to_string()];
 
     if let Some(title) = non_empty(active_title) {
         lines.push(format!("Active window: {title}"));
@@ -485,6 +658,13 @@ fn developer_context_header(
 
     if let Some(path) = file_path {
         lines.push(format!("Workspace file: {}", path.display()));
+    }
+
+    if let Some(attachment) = attachment {
+        lines.push(format!(
+            "Attached lines: {}-{} of {}",
+            attachment.start_line, attachment.end_line, attachment.total_lines
+        ));
     }
 
     if let Some(selected_text) = non_empty(selected_text) {
@@ -497,6 +677,30 @@ fn developer_context_header(
     }
 
     lines.join("\n")
+}
+
+fn developer_status(
+    label: &str,
+    detail: &str,
+    kind: DeveloperContextStatusKind,
+    file_path: Option<&Path>,
+    active_window_title: Option<&str>,
+    attachment: Option<&FileAttachment>,
+    warnings: &[String],
+) -> DeveloperContextStatus {
+    DeveloperContextStatus {
+        label: label.to_string(),
+        detail: detail.to_string(),
+        kind,
+        file_path: file_path.map(|path| path.to_string_lossy().to_string()),
+        active_window_title: active_window_title.map(ToString::to_string),
+        line_range: attachment.map(|attachment| DeveloperLineRange {
+            start: attachment.start_line,
+            end: attachment.end_line,
+            total: attachment.total_lines,
+        }),
+        warnings: warnings.to_vec(),
+    }
 }
 
 fn requested_line_number(prompt: &str) -> Option<usize> {
@@ -593,6 +797,31 @@ fn language_from_path(path: &Path) -> &'static str {
         "toml" => "toml",
         "yml" | "yaml" => "yaml",
         "sql" => "sql",
+        "vue" => "vue",
+        "svelte" => "svelte",
+        "astro" => "astro",
+        "php" => "php",
+        "rb" => "ruby",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "dart" => "dart",
+        "sh" => "bash",
+        "ps1" => "powershell",
+        "go" => "go",
+        "java" => "java",
+        "cs" => "csharp",
+        "cpp" | "cxx" | "cc" => "cpp",
+        "c" | "h" => "c",
+        "hpp" | "hh" => "cpp",
+        "lua" => "lua",
+        "r" => "r",
+        "ex" | "exs" => "elixir",
+        "scala" => "scala",
+        "pl" | "pm" => "perl",
+        "fs" | "fsx" => "fsharp",
+        "clj" | "cljs" => "clojure",
+        "erl" | "hrl" => "erlang",
+        "zig" => "zig",
         _ => "",
     }
 }

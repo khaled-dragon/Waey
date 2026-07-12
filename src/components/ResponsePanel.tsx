@@ -56,7 +56,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
     const developerEdits = parseDeveloperEditBlocks(lastAssistant.content);
 
     for (const edit of developerEdits) {
-      const editKey = `${lastAssistant.id}:${edit.path}:${edit.content.length}`;
+      const editKey = `${lastAssistant.id}:${edit.path}:${hashDeveloperEdit(edit.content)}`;
 
       if (appliedDeveloperEditsRef.current.has(editKey)) {
         continue;
@@ -122,10 +122,10 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
           {(developerContextStatus || developerEditStatus) && (
             <div className="developer-status-stack">
               {developerContextStatus && (
-                <DeveloperStatusChip detail={developerContextStatus.detail} kind={developerContextStatus.kind} label={developerContextStatus.label} />
+                <DeveloperStatusChip status={developerContextStatus} />
               )}
               {developerEditStatus && (
-                <DeveloperStatusChip detail={developerEditStatus.detail} kind={developerEditStatus.kind} label={developerEditStatus.label} />
+                <DeveloperEditStatusChip status={developerEditStatus} />
               )}
             </div>
           )}
@@ -218,18 +218,54 @@ type MessageSegment =
   | { type: "code"; content: string; language: string };
 
 interface DeveloperStatusChipProps {
-  detail: string;
-  kind: "attached" | "warning" | "applied" | "blocked";
-  label: string;
+  status: DeveloperContextStatus;
 }
 
-function DeveloperStatusChip({ detail, kind, label }: DeveloperStatusChipProps) {
+function DeveloperStatusChip({ status }: DeveloperStatusChipProps) {
+  const hasDetails = Boolean(status.filePath || status.activeWindowTitle || status.lineRange || status.warnings.length > 0);
+
   return (
-    <div className={`developer-status-chip developer-status-chip--${kind}`}>
-      <span>{label}</span>
-      <small>{detail}</small>
+    <details className={`developer-status-chip developer-status-chip--${status.kind}`} open={false}>
+      <summary>
+        <span>{status.label}</span>
+        <small>{status.detail}</small>
+      </summary>
+      {hasDetails && (
+        <div className="developer-status-details">
+          {status.filePath && <div><strong>File</strong><span>{status.filePath}</span></div>}
+          {status.lineRange && <div><strong>Lines</strong><span>{status.lineRange.start}-{status.lineRange.end} of {status.lineRange.total}</span></div>}
+          {status.activeWindowTitle && <div><strong>Window</strong><span>{status.activeWindowTitle}</span></div>}
+          {status.warnings.map((warning) => (
+            <div key={warning}><strong>Note</strong><span>{warning}</span></div>
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
+interface DeveloperEditStatusChipProps {
+  status: DeveloperEditStatus;
+}
+
+function DeveloperEditStatusChip({ status }: DeveloperEditStatusChipProps) {
+  return (
+    <div className={`developer-status-chip developer-status-chip--${status.kind}`}>
+      <span>{status.label}</span>
+      <small>{status.detail}</small>
     </div>
   );
+}
+
+function hashDeveloperEdit(content: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16);
 }
 
 interface FormattedAssistantMessageProps {

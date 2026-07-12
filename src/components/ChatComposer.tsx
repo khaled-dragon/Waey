@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { DeveloperAccessLevel, StreamState } from "../shared/types";
 
 interface ChatComposerProps {
@@ -8,7 +9,9 @@ interface ChatComposerProps {
   isRtl: boolean;
   developerModeEnabled: boolean;
   developerAccessLevel: DeveloperAccessLevel;
+  developerWorkspaces: string[];
   onChangeDeveloperAccessLevel: (accessLevel: DeveloperAccessLevel) => void;
+  onChangeDeveloperWorkspaces: (workspaces: string[]) => Promise<void>;
 }
 
 const accessOptions: Array<{
@@ -44,12 +47,16 @@ export function ChatComposer({
   isRtl,
   developerModeEnabled,
   developerAccessLevel,
+  developerWorkspaces,
   onChangeDeveloperAccessLevel,
+  onChangeDeveloperWorkspaces,
 }: ChatComposerProps) {
   const [prompt, setPrompt] = useState("");
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const isStreaming = streamState === "streaming";
   const activeAccess = accessOptions.find((option) => option.id === developerAccessLevel) ?? accessOptions[1];
+  const activeWorkspace = developerWorkspaces[developerWorkspaces.length - 1] ?? null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,10 +74,59 @@ export function ChatComposer({
     }
   }
 
+  async function selectDeveloperWorkspace() {
+    const selectedPath = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose a Waey workspace",
+    });
+
+    if (typeof selectedPath !== "string" || selectedPath.trim().length === 0) {
+      return;
+    }
+
+    const normalizedPath = selectedPath.trim();
+    const nextWorkspaces = [
+      ...developerWorkspaces.filter((workspace) => workspace !== normalizedPath),
+      normalizedPath,
+    ].slice(-8);
+
+    await onChangeDeveloperWorkspaces(nextWorkspaces);
+    setWorkspaceMenuOpen(false);
+  }
+
+  async function removeDeveloperWorkspace(workspace: string) {
+    await onChangeDeveloperWorkspaces(developerWorkspaces.filter((item) => item !== workspace));
+  }
+
   return (
     <form className="chat-composer" onSubmit={handleSubmit}>
       {developerModeEnabled && (
         <div className="dev-access-menu-wrap">
+          <button
+            className="dev-workspace-button"
+            onClick={() => void selectDeveloperWorkspace()}
+            title={activeWorkspace ?? "Add local workspace"}
+            type="button"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
+              <path d="M3 6v12a2 2 0 0 0 2 2" />
+            </svg>
+            <span>{activeWorkspace ? compactWorkspaceName(activeWorkspace) : (isRtl ? "إضافة مساحة" : "Add local space")}</span>
+          </button>
+          {developerWorkspaces.length > 0 && (
+            <button
+              className="dev-workspace-caret"
+              onClick={() => setWorkspaceMenuOpen((isOpen) => !isOpen)}
+              title="Workspace options"
+              type="button"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          )}
           <button
             className="dev-access-trigger"
             onClick={() => setAccessMenuOpen((isOpen) => !isOpen)}
@@ -82,6 +138,21 @@ export function ChatComposer({
               <path d="M6 9l6 6 6-6" />
             </svg>
           </button>
+          {workspaceMenuOpen && (
+            <div className="dev-workspace-menu" role="menu">
+              <div className="dev-access-menu-title">Local workspaces</div>
+              {developerWorkspaces.map((workspace) => (
+                <div className="dev-workspace-option" key={workspace}>
+                  <button onClick={() => void onChangeDeveloperWorkspaces([...developerWorkspaces.filter((item) => item !== workspace), workspace])} title={workspace} type="button">
+                    <span>{compactWorkspaceName(workspace)}</span>
+                    <small>{workspace}</small>
+                  </button>
+                  <button className="dev-workspace-remove" onClick={() => void removeDeveloperWorkspace(workspace)} title="Remove workspace" type="button">x</button>
+                </div>
+              ))}
+              <button className="dev-workspace-add" onClick={() => void selectDeveloperWorkspace()} type="button">Add another workspace</button>
+            </div>
+          )}
           {accessMenuOpen && (
             <div className="dev-access-menu" role="menu">
               <div className="dev-access-menu-title">How should Waey handle code actions?</div>
@@ -131,4 +202,16 @@ export function ChatComposer({
       )}
     </form>
   );
+}
+
+function compactWorkspaceName(path: string) {
+  const normalizedPath = path.replace(/\\/g, "/").replace(/\/$/, "");
+  const parts = normalizedPath.split("/").filter(Boolean);
+  const name = parts[parts.length - 1] ?? normalizedPath;
+
+  if (name.length <= 26) {
+    return name;
+  }
+
+  return `${name.slice(0, 12)}...${name.slice(-9)}`;
 }

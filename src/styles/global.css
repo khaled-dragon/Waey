@@ -967,6 +967,7 @@ body {
   flex-basis: 100%;
   display: flex;
   align-items: center;
+  gap: 5px;
 }
 
 .dev-access-trigger {
@@ -982,6 +983,129 @@ body {
   font-size: 11px;
   font-weight: 700;
   padding: 5px 8px;
+}
+
+.dev-workspace-button,
+.dev-workspace-caret {
+  border: 1px solid var(--border-sub);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.dev-workspace-button {
+  max-width: min(250px, 48%);
+}
+
+.dev-workspace-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-workspace-caret {
+  width: 28px;
+  justify-content: center;
+  padding: 5px;
+}
+
+.dev-workspace-button:hover,
+.dev-workspace-caret:hover,
+.dev-access-trigger:hover {
+  border-color: color-mix(in srgb, var(--accent-coral) 48%, var(--border-sub));
+  color: var(--accent-coral);
+}
+
+.dev-workspace-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 21;
+  width: min(430px, calc(100vw - 42px));
+  border: 1px solid var(--border-item);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 18px 50px rgba(20, 6, 10, 0.28);
+  padding: 8px;
+}
+
+[dir="rtl"] .dev-workspace-menu {
+  left: auto;
+  right: 0;
+}
+
+.dev-workspace-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.dev-workspace-option > button:first-child {
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px;
+  text-align: start;
+}
+
+.dev-workspace-option > button:first-child:hover {
+  background: color-mix(in srgb, var(--accent-coral) 10%, var(--bg-surface));
+}
+
+.dev-workspace-option span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dev-workspace-option small {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-workspace-remove {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-sub);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 800;
+}
+
+.dev-workspace-add {
+  width: 100%;
+  border: 1px solid var(--border-sub);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--accent-coral);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  margin-top: 6px;
+  padding: 7px;
 }
 
 .dev-access-icon,
@@ -1096,6 +1220,19 @@ body {
   line-height: 1.35;
 }
 
+.developer-status-chip summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  max-width: 100%;
+}
+
+.developer-status-chip summary::-webkit-details-marker {
+  display: none;
+}
+
 .developer-status-chip span {
   color: var(--text-primary);
   font-weight: 800;
@@ -1119,6 +1256,32 @@ body {
 .developer-status-chip--blocked {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border-sub));
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+}
+
+.developer-status-details {
+  flex-basis: 100%;
+  display: grid;
+  gap: 4px;
+  min-width: min(260px, 100%);
+  padding-top: 6px;
+}
+
+.developer-status-details div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.developer-status-details strong {
+  color: var(--text-primary);
+  font-size: 10.5px;
+}
+
+.developer-status-details span {
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .worked-timer {

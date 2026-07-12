@@ -1,6 +1,7 @@
 export {
   cancelRegionSelection,
   captureCurrentScreen,
+  captureCurrentUiContext,
   capturePreviewUrl,
   captureSelectedRegion,
   showRegionSelector,

@@ -26,6 +26,7 @@ use providers::{
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+use ui_context::{capture_ui_context, UiContextSnapshot};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const REGION_WINDOW_LABEL: &str = "region-selector";
@@ -96,6 +97,20 @@ fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCa
             Err(error)
         }
     }
+}
+
+#[tauri::command]
+fn capture_current_ui_context(app: AppHandle) -> Result<Option<UiContextSnapshot>, String> {
+    if !attach_ui_context(&app) {
+        return Ok(None);
+    }
+
+    hide_window_safely(&app, MAIN_WINDOW_LABEL);
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    let context = capture_ui_context(None);
+    restore_main_window(&app)?;
+
+    Ok(context)
 }
 
 #[tauri::command]
@@ -446,6 +461,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .manage(LlmRequestRegistry::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -475,6 +491,7 @@ pub fn run() {
             show_region_selector_window,
             capture_current_screen,
             capture_selected_region,
+            capture_current_ui_context,
             cancel_region_selection,
             bootstrap_managed_provider,
             check_managed_provider_update,

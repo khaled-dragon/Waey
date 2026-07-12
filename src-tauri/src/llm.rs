@@ -1,4 +1,5 @@
 use crate::providers::{LlmProvider, ProviderKind};
+use crate::settings::{get_settings, DeveloperAccessLevel};
 use crate::ui_context::UiContextSnapshot;
 use base64::{engine::general_purpose, Engine};
 use futures_util::StreamExt;
@@ -117,7 +118,7 @@ async fn stream_openai_compatible_response(
     let response = client
         .post(endpoint)
         .headers(request_headers(&request.provider)?)
-        .json(&chat_request_body(request)?)
+        .json(&chat_request_body(app, request)?)
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -212,11 +213,15 @@ fn request_headers(provider: &LlmProvider) -> Result<reqwest::header::HeaderMap,
     Ok(headers)
 }
 
-fn chat_request_body(request: &LlmChatRequest) -> Result<Value, String> {
+fn chat_request_body(app: &AppHandle, request: &LlmChatRequest) -> Result<Value, String> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached. If developer workspace context is attached in the user message, treat it as visible local file context that you can read, even when no image is attached. Do not ask the user to upload or resend a file that is already included in developer context. For requested file edits, return a fenced `waey-edit` block with `path: ABSOLUTE_FILE_PATH` on the first line and the full replacement file content after it. The `waey-edit` block must not contain explanations, partial snippets, or markdown around the replacement. Wrap ordinary code, terminal commands, and config snippets in fenced Markdown code blocks."
+        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached or readable UI structure is provided. If readable UI structure is provided without an image, use it as a text snapshot of visible controls, focused elements, and selected text. Wrap ordinary code, terminal commands, and config snippets in fenced Markdown code blocks."
     })];
+
+    if let Some(message) = developer_system_message(app) {
+        messages.push(message);
+    }
 
     if let Some(persona_prompt) = persona_system_message(request) {
         messages.push(persona_prompt);
@@ -241,6 +246,52 @@ fn chat_request_body(request: &LlmChatRequest) -> Result<Value, String> {
     }
 
     Ok(body)
+}
+
+fn developer_system_message(app: &AppHandle) -> Option<Value> {
+    let settings = get_settings(app).ok()?;
+
+    if !settings.developer_mode_enabled {
+        return None;
+    }
+
+    let workspaces = settings
+        .developer_workspaces
+        .iter()
+        .map(|workspace| format!("- {workspace}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let workspaces = if workspaces.trim().is_empty() {
+        "- No workspace selected".to_string()
+    } else {
+        workspaces
+    };
+    let access = developer_access_label(&settings.developer_access_level);
+    let content = format!(
+        "Developer Mode is enabled.\n\
+Allowed workspaces:\n{workspaces}\n\
+Current access level: {access}\n\n\
+When developer workspace context is attached, treat it as visible local file context that you can read, even if no screenshot is attached. Do not ask the user to upload or paste a file that is already included in developer context.\n\
+If the user asks to edit or create a file, return a concise answer plus a fenced `waey-edit` block. The block must start with `path: ABSOLUTE_FILE_PATH`, followed by the complete replacement file content. Do not put explanations, partial snippets, or markdown inside the `waey-edit` block.\n\
+Waey applies edits only after local workspace and access checks. Keep changes narrow, avoid destructive edits unless explicitly requested, and never include secret material."
+    );
+
+    Some(json!({
+        "role": "system",
+        "content": content
+    }))
+}
+
+fn developer_access_label(access: &DeveloperAccessLevel) -> &'static str {
+    match access {
+        DeveloperAccessLevel::Ask => {
+            "ask for approval before reading or applying developer context"
+        }
+        DeveloperAccessLevel::Assist => "ask before applying file edits",
+        DeveloperAccessLevel::Auto => {
+            "apply safe workspace edits automatically when Waey validates them"
+        }
+    }
 }
 
 fn persona_system_message(request: &LlmChatRequest) -> Option<Value> {
@@ -312,7 +363,7 @@ fn prompt_with_ui_context(request: &LlmChatRequest) -> String {
     }
 
     format!(
-        "{}\n\nReadable screen structure captured with the screenshot:\n{}",
+        "{}\n\nReadable screen structure captured by Waey:\n{}",
         request.prompt,
         formatted_contexts.join("\n\n")
     )

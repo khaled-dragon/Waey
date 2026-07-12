@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import type { CaptureRect, ScreenCapture } from "../../shared/types";
+import type { CaptureRect, ScreenCapture, UiContextSnapshot } from "../../shared/types";
 
 export function captureCurrentScreen() {
   return invoke<ScreenCapture>("capture_current_screen");
@@ -7,6 +7,10 @@ export function captureCurrentScreen() {
 
 export function captureSelectedRegion(rect: CaptureRect) {
   return invoke<ScreenCapture>("capture_selected_region", { rect });
+}
+
+export function captureCurrentUiContext() {
+  return invoke<UiContextSnapshot | null>("capture_current_ui_context");
 }
 
 export function showRegionSelector() {

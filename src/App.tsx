@@ -6,9 +6,9 @@ import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft } from "./shared/types";
+import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft, UiContextSnapshot } from "./shared/types";
 import { useLlmChat } from "./features/chat";
-import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen } from "./features/capture";
+import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen, captureCurrentUiContext } from "./features/capture";
 import { buildDeveloperContext, writeDeveloperFile } from "./features/dev";
 import { useConversationHistory } from "./features/history";
 import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
@@ -82,8 +82,13 @@ function MainOverlay() {
     };
   }, [clearCaptures]);
 
-  function openConversation(id: string) { setActivePanel("chat"); void loadConversation(id); }
-  function startFreshConversation() { setActivePanel("chat"); startNewConversation(); }
+  function clearDeveloperStatuses() {
+    setDeveloperContextStatus(null);
+    setDeveloperEditStatus(null);
+  }
+
+  function openConversation(id: string) { setActivePanel("chat"); clearDeveloperStatuses(); void loadConversation(id); }
+  function startFreshConversation() { setActivePanel("chat"); clearDeveloperStatuses(); startNewConversation(); }
   function renameSavedConversation(id: string, title: string) { return renameConversation(id, title); }
   function pinSavedConversation(id: string, pinned: boolean) { return pinConversation(id, pinned); }
   function hasActiveConversation() { return activeConversationId !== null || messages.length > 0; }
@@ -132,17 +137,37 @@ function MainOverlay() {
     await captureCurrentScreen().catch(() => undefined);
   }
 
-  async function submitPromptWithDeveloperContext(prompt: string) {
-    if (!selectedProvider) {
-      setActivePanel("settings");
-      return;
+  async function freshPromptUiContexts() {
+    const contexts: UiContextSnapshot[] = [];
+
+    if (settings.attachUiContext) {
+      const freshContext = await captureCurrentUiContext().catch((error) => {
+        setCaptureError(error instanceof Error ? error.message : String(error));
+        return null;
+      });
+
+      if (freshContext) {
+        contexts.push(freshContext);
+      }
     }
 
-    setActivePanel("chat");
+    for (const context of latestUiContexts) {
+      if (contexts.length >= 3) {
+        break;
+      }
 
+      if (!contexts.some((existing) => existing.capturedAt === context.capturedAt)) {
+        contexts.push(context);
+      }
+    }
+
+    return contexts;
+  }
+
+  async function promptWithDeveloperContext(prompt: string) {
     let requestPrompt = prompt;
-    setDeveloperContextStatus(null);
-    setDeveloperEditStatus(null);
+    clearDeveloperStatuses();
+    const uiContexts = await freshPromptUiContexts();
 
     if (settings.developerModeEnabled) {
       const approved = settings.developerAccessLevel !== "ask" || window.confirm("Allow Waey to read code context from your allowed workspaces for this prompt?");
@@ -151,7 +176,7 @@ function MainOverlay() {
         const developerContext = await buildDeveloperContext({
           approved,
           prompt,
-          uiContexts: latestUiContexts,
+          uiContexts,
         }).catch((error) => {
           setCaptureError(error instanceof Error ? error.message : String(error));
           return null;
@@ -164,7 +189,31 @@ function MainOverlay() {
       }
     }
 
-    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, requestPrompt, latestUiContexts);
+    return { requestPrompt, uiContexts };
+  }
+
+  async function submitPromptWithDeveloperContext(prompt: string) {
+    if (!selectedProvider) {
+      setActivePanel("settings");
+      return;
+    }
+
+    setActivePanel("chat");
+    const { requestPrompt, uiContexts } = await promptWithDeveloperContext(prompt);
+
+    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, requestPrompt, uiContexts);
+  }
+
+  async function editLastUserMessageWithDeveloperContext(messageId: string, prompt: string) {
+    if (!selectedProvider) {
+      setActivePanel("settings");
+      return;
+    }
+
+    setActivePanel("chat");
+    const { requestPrompt, uiContexts } = await promptWithDeveloperContext(prompt);
+
+    return editLastUserMessage(messageId, prompt, selectedProvider, selectedPersona, requestPrompt, uiContexts);
   }
 
   async function applyDeveloperEdit(path: string, content: string) {
@@ -218,6 +267,7 @@ function MainOverlay() {
 
   function endChatAndClose() {
     setShowClosePrompt(false);
+    clearDeveloperStatuses();
     startNewConversation();
     clearCaptures();
     void hideOverlayWindow();
@@ -315,14 +365,7 @@ function MainOverlay() {
                 messages={messages}
                 developerContextStatus={developerContextStatus}
                 developerEditStatus={developerEditStatus}
-                onEditLastUserMessage={(messageId, prompt) => {
-                  if (!selectedProvider) {
-                    setActivePanel("settings");
-                    return Promise.resolve();
-                  }
-
-                  return editLastUserMessage(messageId, prompt, selectedProvider, selectedPersona);
-                }}
+                onEditLastUserMessage={editLastUserMessageWithDeveloperContext}
                 onApplyDeveloperEdit={applyDeveloperEdit}
                 onRemoveCapture={removeCapture}
                 streamState={streamState}
@@ -338,9 +381,11 @@ function MainOverlay() {
                 isRtl={isRtl}
                 developerModeEnabled={settings.developerModeEnabled}
                 developerAccessLevel={settings.developerAccessLevel}
+                developerWorkspaces={settings.developerWorkspaces}
                 onChangeDeveloperAccessLevel={(developerAccessLevel) => {
                   void updateSettings({ ...settings, developerAccessLevel });
                 }}
+                onChangeDeveloperWorkspaces={(developerWorkspaces) => updateSettings({ ...settings, developerWorkspaces })}
               />
             </div>
           )}

@@ -40,7 +40,6 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
   const [personaDraft, setPersonaDraft] = useState<PersonaDraft>(initialPersonaDraft);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [personaError, setPersonaError] = useState<string | null>(null);
-  const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [savingProvider, setSavingProvider] = useState(false);
   const [savingPersona, setSavingPersona] = useState(false);
   const managedProviders = providers.filter((provider) => provider.managed);
@@ -48,27 +47,6 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     void onChangeSettings({ ...settings, [key]: value });
-  }
-
-  function addDeveloperWorkspace() {
-    const nextWorkspace = workspaceDraft.trim().replace(/^["']|["']$/g, "");
-
-    if (!nextWorkspace || settings.developerWorkspaces.includes(nextWorkspace)) {
-      return;
-    }
-
-    setWorkspaceDraft("");
-    void onChangeSettings({
-      ...settings,
-      developerWorkspaces: [...settings.developerWorkspaces, nextWorkspace],
-    });
-  }
-
-  function removeDeveloperWorkspace(workspace: string) {
-    void onChangeSettings({
-      ...settings,
-      developerWorkspaces: settings.developerWorkspaces.filter((item) => item !== workspace),
-    });
   }
 
   function updateProviderDraft<K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) {
@@ -222,32 +200,6 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
                   {isRtl
                     ? "تنبيه مهم: عند تفعيل Developer Mode وإتاحة قراءة أو تعديل ملفاتك لأي موديل، فأنت المسؤول عن مراجعة النتائج وأي ضرر قد يحدث. استخدم مستويات الوصول بحذر، ولا تضف إلا فولدرات تثق أن Waey يتعامل معها."
                     : "Important: when Developer Mode lets a model read or edit local files, you are responsible for reviewing the results and any impact. Use access levels carefully, and only add folders you trust Waey to work with."}
-                </div>
-                <div className="field-label">Allowed workspaces</div>
-                <div className="developer-workspace-form">
-                  <input
-                    className="form-input"
-                    onChange={(event) => setWorkspaceDraft(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        addDeveloperWorkspace();
-                      }
-                    }}
-                    placeholder="C:\\Users\\Khaled\\Desktop\\Project"
-                    value={workspaceDraft}
-                  />
-                  <button className="btn-secondary" onClick={addDeveloperWorkspace} type="button">Add</button>
-                </div>
-                <div className="developer-workspace-list">
-                  {settings.developerWorkspaces.length === 0 ? (
-                    <div className="empty-list">No workspaces allowed yet</div>
-                  ) : settings.developerWorkspaces.map((workspace) => (
-                    <div className="developer-workspace-item" key={workspace}>
-                      <span>{workspace}</span>
-                      <button className="btn-secondary" onClick={() => removeDeveloperWorkspace(workspace)} type="button">Remove</button>
-                    </div>
-                  ))}
                 </div>
               </div>
             )}
