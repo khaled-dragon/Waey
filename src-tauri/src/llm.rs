@@ -273,7 +273,7 @@ Allowed workspaces:\n{workspaces}\n\
 Current access level: {access}\n\n\
 When developer workspace context is attached, treat it as visible local file context that you can read, even if no screenshot is attached. Do not ask the user to upload or paste a file that is already included in developer context.\n\
 If the user asks to edit or create a text/code file, return a concise answer plus a fenced `waey-edit` block. The block must start with `path: ABSOLUTE_FILE_PATH`, followed by the complete replacement file content. Do not put explanations, partial snippets, or markdown inside the `waey-edit` block.\n\
-If the user asks to create or modify an .xlsx workbook, do not claim you cannot edit binary Excel files. Use the attached workbook summary and return a fenced `waey-sheet-edit` JSON block. The JSON shape is {\"path\":\"ABSOLUTE_FILE_PATH\",\"actions\":[...]}. Supported action types are addSheet {sheet}, setCell {sheet, cell, value}, setFormula {sheet, cell, formula}, appendRow {sheet, values}, and clearCell {sheet, cell}. Use absolute paths inside allowed workspaces only.\n\
+If the user asks to create or modify an .xlsx workbook, do not claim you cannot edit binary Excel files. Use the attached workbook summary and return a fenced `waey-sheet-edit` JSON block. The JSON shape is {{\"path\":\"ABSOLUTE_FILE_PATH\",\"actions\":[...]}}. Supported action types are addSheet {{sheet}}, setCell {{sheet, cell, value}}, setFormula {{sheet, cell, formula}}, appendRow {{sheet, values}}, and clearCell {{sheet, cell}}. Use absolute paths inside allowed workspaces only.\n\
 Waey applies edits only after local workspace and access checks. Keep changes narrow, avoid destructive edits unless explicitly requested, and never include secret material."
     );
 
