@@ -1,6 +1,6 @@
 [package]
 name = "waey"
-version = "1.4.2"
+version = "1.4.3"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -31,6 +31,7 @@ futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
+umya-spreadsheet = "3.0.1"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.10.1"

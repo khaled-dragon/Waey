@@ -110,6 +110,8 @@ export interface UiContextSnapshot {
   platform: "windows";
   activeWindowTitle?: string | null;
   activeAppName?: string | null;
+  selectedText?: string | null;
+  selectedTextSource?: string | null;
   capturedAt: number;
   region?: CaptureRect | null;
   elements: UiElementSummary[];

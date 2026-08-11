@@ -1,4 +1,5 @@
 use crate::settings::{get_settings, DeveloperAccessLevel};
+use crate::spreadsheet;
 use crate::ui_context::UiContextSnapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -169,42 +170,59 @@ pub fn build_developer_context(
         ));
     }
 
-    let attachment = read_file_attachment(&matched_path, requested_line, selected_text.as_deref())?;
-    let content = format!(
-        "{}\n\nMatched file: {}\nAttached lines: {}-{} of {}\n\n```{}\n{}\n```",
-        developer_context_header(
-            active_title.as_deref(),
-            Some(&matched_path),
-            Some(&attachment),
-            selected_text.as_deref(),
-            &warnings,
-        ),
-        matched_path.display(),
-        attachment.start_line,
-        attachment.end_line,
-        attachment.total_lines,
-        language_from_path(&matched_path),
-        attachment.content
-    );
+    let content;
+    let mut attachment = None;
+
+    if is_spreadsheet_file(&matched_path) {
+        let spreadsheet_summary = spreadsheet::summarize_workbook(&matched_path)?;
+        content = format!(
+            "{}\n\nMatched spreadsheet: {}\n\n```text\n{}\n```",
+            developer_context_header(
+                active_title.as_deref(),
+                Some(&matched_path),
+                None,
+                selected_text.as_deref(),
+                &warnings,
+            ),
+            matched_path.display(),
+            spreadsheet_summary,
+        );
+    } else {
+        let file_attachment =
+            read_file_attachment(&matched_path, requested_line, selected_text.as_deref())?;
+        content = format!(
+            "{}\n\nMatched file: {}\nAttached lines: {}-{} of {}\n\n```{}\n{}\n```",
+            developer_context_header(
+                active_title.as_deref(),
+                Some(&matched_path),
+                Some(&file_attachment),
+                selected_text.as_deref(),
+                &warnings,
+            ),
+            matched_path.display(),
+            file_attachment.start_line,
+            file_attachment.end_line,
+            file_attachment.total_lines,
+            language_from_path(&matched_path),
+            file_attachment.content
+        );
+        attachment = Some(file_attachment);
+    }
 
     Ok(Some(DeveloperContextResponse {
         content,
         file_path: Some(matched_path.to_string_lossy().to_string()),
         status: developer_status(
-            "Code context attached",
-            &format!(
-                "{} lines {}-{}",
-                matched_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("workspace file"),
-                attachment.start_line,
-                attachment.end_line
-            ),
+            if is_spreadsheet_file(&matched_path) {
+                "Spreadsheet context attached"
+            } else {
+                "Code context attached"
+            },
+            &developer_status_detail(&matched_path, attachment.as_ref()),
             DeveloperContextStatusKind::Attached,
             Some(&matched_path),
             active_title.as_deref(),
-            Some(&attachment),
+            attachment.as_ref(),
             &warnings,
         ),
         warnings,
@@ -334,10 +352,16 @@ fn active_window_title(contexts: &[UiContextSnapshot]) -> Option<String> {
 fn selected_text_from_contexts(contexts: &[UiContextSnapshot]) -> Option<String> {
     contexts
         .iter()
-        .flat_map(|context| context.elements.iter())
-        .find(|element| element.focused || element.under_cursor)
-        .and_then(|element| non_empty(element.selected_text.as_deref()))
+        .find_map(|context| non_empty(context.selected_text.as_deref()))
         .map(ToString::to_string)
+        .or_else(|| {
+            contexts
+                .iter()
+                .flat_map(|context| context.elements.iter())
+                .find(|element| element.focused || element.under_cursor)
+                .and_then(|element| non_empty(element.selected_text.as_deref()))
+                .map(ToString::to_string)
+        })
         .or_else(|| {
             contexts
                 .iter()
@@ -419,7 +443,7 @@ fn candidates_from_text(text: &str) -> Vec<String> {
         .flat_map(|part| part.split_whitespace())
         .flat_map(|part| part.split(" - "))
         .map(clean_candidate_token)
-        .filter(|part| looks_like_code_file(part))
+        .filter(|part| looks_like_workspace_file(part))
     {
         if !candidates
             .iter()
@@ -442,6 +466,15 @@ fn clean_candidate_token(value: &str) -> String {
             )
         })
         .to_string()
+}
+
+fn looks_like_workspace_file(value: &str) -> bool {
+    looks_like_code_file(value)
+        || Path::new(value)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| matches!(extension.to_ascii_lowercase().as_str(), "xlsx"))
+            .unwrap_or(false)
 }
 
 fn looks_like_code_file(value: &str) -> bool {
@@ -501,6 +534,13 @@ fn looks_like_code_file(value: &str) -> bool {
             | "zig"
             | "dockerfile"
     )
+}
+
+fn is_spreadsheet_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("xlsx"))
+        .unwrap_or(false)
 }
 
 fn find_file_in_workspaces(
@@ -701,6 +741,22 @@ fn developer_status(
         }),
         warnings: warnings.to_vec(),
     }
+}
+
+fn developer_status_detail(path: &Path, attachment: Option<&FileAttachment>) -> String {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("workspace file");
+
+    if let Some(attachment) = attachment {
+        return format!(
+            "{} lines {}-{}",
+            file_name, attachment.start_line, attachment.end_line
+        );
+    }
+
+    format!("{file_name} workbook summary")
 }
 
 fn requested_line_number(prompt: &str) -> Option<usize> {

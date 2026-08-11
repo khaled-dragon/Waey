@@ -216,7 +216,7 @@ fn request_headers(provider: &LlmProvider) -> Result<reqwest::header::HeaderMap,
 fn chat_request_body(app: &AppHandle, request: &LlmChatRequest) -> Result<Value, String> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached or readable UI structure is provided. If readable UI structure is provided without an image, use it as a text snapshot of visible controls, focused elements, and selected text. Wrap ordinary code, terminal commands, and config snippets in fenced Markdown code blocks."
+        "content": "You are Waey, a concise screen-aware desktop assistant. Answer directly using the user's screen context when an image is attached or readable UI structure is provided. If readable UI structure is provided without an image, use it as a text snapshot of visible controls, focused elements, active apps, cursor anchors, and selected text. Wrap ordinary code, terminal commands, and config snippets in fenced Markdown code blocks."
     })];
 
     if let Some(message) = developer_system_message(app) {
@@ -272,7 +272,8 @@ fn developer_system_message(app: &AppHandle) -> Option<Value> {
 Allowed workspaces:\n{workspaces}\n\
 Current access level: {access}\n\n\
 When developer workspace context is attached, treat it as visible local file context that you can read, even if no screenshot is attached. Do not ask the user to upload or paste a file that is already included in developer context.\n\
-If the user asks to edit or create a file, return a concise answer plus a fenced `waey-edit` block. The block must start with `path: ABSOLUTE_FILE_PATH`, followed by the complete replacement file content. Do not put explanations, partial snippets, or markdown inside the `waey-edit` block.\n\
+If the user asks to edit or create a text/code file, return a concise answer plus a fenced `waey-edit` block. The block must start with `path: ABSOLUTE_FILE_PATH`, followed by the complete replacement file content. Do not put explanations, partial snippets, or markdown inside the `waey-edit` block.\n\
+If the user asks to create or modify an .xlsx workbook, do not claim you cannot edit binary Excel files. Use the attached workbook summary and return a fenced `waey-sheet-edit` JSON block. The JSON shape is {\"path\":\"ABSOLUTE_FILE_PATH\",\"actions\":[...]}. Supported action types are addSheet {sheet}, setCell {sheet, cell, value}, setFormula {sheet, cell, formula}, appendRow {sheet, values}, and clearCell {sheet, cell}. Use absolute paths inside allowed workspaces only.\n\
 Waey applies edits only after local workspace and access checks. Keep changes narrow, avoid destructive edits unless explicitly requested, and never include secret material."
     );
 
@@ -377,11 +378,17 @@ fn format_ui_context(index: usize, context: &UiContextSnapshot) -> Option<String
             .unwrap_or("")
             .trim()
             .is_empty()
+        && context
+            .selected_text
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
     {
         return None;
     }
 
-    let mut lines = vec![format!("Screenshot {index}:")];
+    let mut lines = vec![format!("Screen context {index}:")];
 
     if let Some(title) = non_empty(context.active_window_title.as_deref()) {
         lines.push(format!("- Active window: {title}"));
@@ -389,6 +396,13 @@ fn format_ui_context(index: usize, context: &UiContextSnapshot) -> Option<String
 
     if let Some(app_name) = non_empty(context.active_app_name.as_deref()) {
         lines.push(format!("- App: {app_name}"));
+    }
+
+    if let Some(selected_text) = non_empty(context.selected_text.as_deref()) {
+        let source = non_empty(context.selected_text_source.as_deref())
+            .map(|source| format!(" via {source}"))
+            .unwrap_or_default();
+        lines.push(format!("- Selected text{source}: {selected_text}"));
     }
 
     if let Some(region) = &context.region {

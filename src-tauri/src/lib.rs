@@ -6,6 +6,7 @@ mod logger;
 mod personas;
 mod providers;
 mod settings;
+mod spreadsheet;
 mod storage;
 mod ui_context;
 
@@ -25,6 +26,7 @@ use providers::{
 };
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
+use spreadsheet::apply_developer_spreadsheet_edit;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use ui_context::{capture_ui_context, UiContextSnapshot};
 
@@ -100,14 +102,17 @@ fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCa
 }
 
 #[tauri::command]
-fn capture_current_ui_context(app: AppHandle) -> Result<Option<UiContextSnapshot>, String> {
+fn capture_current_ui_context(
+    app: AppHandle,
+    allow_clipboard_selection: bool,
+) -> Result<Option<UiContextSnapshot>, String> {
     if !attach_ui_context(&app) {
         return Ok(None);
     }
 
     hide_window_safely(&app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(80));
-    let context = capture_ui_context(None);
+    let context = capture_ui_context(None, allow_clipboard_selection);
     restore_main_window(&app)?;
 
     Ok(context)
@@ -515,7 +520,8 @@ pub fn run() {
             get_app_settings,
             save_app_settings,
             build_developer_context,
-            write_developer_file
+            write_developer_file,
+            apply_developer_spreadsheet_edit
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

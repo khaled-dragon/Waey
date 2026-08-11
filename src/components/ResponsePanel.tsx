@@ -11,6 +11,7 @@ interface ResponsePanelProps {
   developerEditStatus: DeveloperEditStatus | null;
   onEditLastUserMessage: (messageId: string, prompt: string) => Promise<void>;
   onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
+  onApplySpreadsheetEdit: (content: string) => Promise<void>;
   onRemoveCapture: (path: string) => void;
   streamState: StreamState;
   isRtl: boolean;
@@ -19,7 +20,7 @@ interface ResponsePanelProps {
   developerAccessLevel: DeveloperAccessLevel;
 }
 
-export function ResponsePanel({ capture, captures, errorMessage, messages, developerContextStatus, developerEditStatus, onEditLastUserMessage, onApplyDeveloperEdit, onRemoveCapture, streamState, isRtl, workedForMs, developerModeEnabled, developerAccessLevel }: ResponsePanelProps) {
+export function ResponsePanel({ capture, captures, errorMessage, messages, developerContextStatus, developerEditStatus, onEditLastUserMessage, onApplyDeveloperEdit, onApplySpreadsheetEdit, onRemoveCapture, streamState, isRtl, workedForMs, developerModeEnabled, developerAccessLevel }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
   const previewItems = captures.map((captureItem) => ({
     capture: captureItem,
@@ -54,6 +55,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
     }
 
     const developerEdits = parseDeveloperEditBlocks(lastAssistant.content);
+    const spreadsheetEdits = parseSpreadsheetEditBlocks(lastAssistant.content);
 
     for (const edit of developerEdits) {
       const editKey = `${lastAssistant.id}:${edit.path}:${hashDeveloperEdit(edit.content)}`;
@@ -65,7 +67,18 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
       appliedDeveloperEditsRef.current.add(editKey);
       void onApplyDeveloperEdit(edit.path, edit.content);
     }
-  }, [developerAccessLevel, developerModeEnabled, messages, onApplyDeveloperEdit, streamState]);
+
+    for (const edit of spreadsheetEdits) {
+      const editKey = `${lastAssistant.id}:sheet:${hashDeveloperEdit(edit)}`;
+
+      if (appliedDeveloperEditsRef.current.has(editKey)) {
+        continue;
+      }
+
+      appliedDeveloperEditsRef.current.add(editKey);
+      void onApplySpreadsheetEdit(edit);
+    }
+  }, [developerAccessLevel, developerModeEnabled, messages, onApplyDeveloperEdit, onApplySpreadsheetEdit, streamState]);
 
   function handleScroll() {
     const container = scrollContainerRef.current;
@@ -172,7 +185,7 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
                 </form>
               ) : (
                 <div className="message-bubble">
-                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} onApplyDeveloperEdit={onApplyDeveloperEdit} reasoningContent={message.reasoningContent} /> : message.content}
+                  {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} onApplyDeveloperEdit={onApplyDeveloperEdit} onApplySpreadsheetEdit={onApplySpreadsheetEdit} reasoningContent={message.reasoningContent} /> : message.content}
                 </div>
               )}
             </div>
@@ -272,10 +285,11 @@ interface FormattedAssistantMessageProps {
   content: string;
   isRtl: boolean;
   onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
+  onApplySpreadsheetEdit: (content: string) => Promise<void>;
   reasoningContent?: string;
 }
 
-function FormattedAssistantMessage({ content, isRtl, onApplyDeveloperEdit, reasoningContent }: FormattedAssistantMessageProps) {
+function FormattedAssistantMessage({ content, isRtl, onApplyDeveloperEdit, onApplySpreadsheetEdit, reasoningContent }: FormattedAssistantMessageProps) {
   const { answer, thinking } = parseAssistantThinking(content);
   const visibleThinking = reasoningContent?.trim() || thinking;
   const segments = parseMessageSegments(answer);
@@ -285,7 +299,7 @@ function FormattedAssistantMessage({ content, isRtl, onApplyDeveloperEdit, reaso
       {visibleThinking.length > 0 && <ThinkingDisclosure content={visibleThinking} isRtl={isRtl} />}
       {segments.map((segment, index) =>
         segment.type === "code" ? (
-          <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} onApplyDeveloperEdit={onApplyDeveloperEdit} />
+          <CodeBlock content={segment.content} isRtl={isRtl} key={`${segment.type}-${index}`} language={segment.language} onApplyDeveloperEdit={onApplyDeveloperEdit} onApplySpreadsheetEdit={onApplySpreadsheetEdit} />
         ) : (
           <span key={`${segment.type}-${index}`}>{segment.content}</span>
         ),
@@ -315,13 +329,15 @@ interface CodeBlockProps {
   isRtl: boolean;
   language: string;
   onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
+  onApplySpreadsheetEdit: (content: string) => Promise<void>;
 }
 
-function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit }: CodeBlockProps) {
+function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit, onApplySpreadsheetEdit }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const [applying, setApplying] = useState(false);
   const label = language || "code";
   const developerEdit = parseDeveloperEditBlock(language, content);
+  const spreadsheetEdit = parseSpreadsheetEditBlock(language, content);
 
   async function copyCode() {
     try {
@@ -347,6 +363,20 @@ function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit }: CodeBlock
     }
   }
 
+  async function applySpreadsheetEdit() {
+    if (!spreadsheetEdit) {
+      return;
+    }
+
+    setApplying(true);
+
+    try {
+      await onApplySpreadsheetEdit(spreadsheetEdit);
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <div className="code-block">
       <div className="code-block-header">
@@ -355,6 +385,11 @@ function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit }: CodeBlock
           {developerEdit && (
             <button className="code-copy-btn" disabled={applying} onClick={() => void applyDeveloperEdit()} type="button">
               {applying ? "..." : "Apply"}
+            </button>
+          )}
+          {spreadsheetEdit && (
+            <button className="code-copy-btn" disabled={applying} onClick={() => void applySpreadsheetEdit()} type="button">
+              {applying ? "..." : "Apply Sheet"}
             </button>
           )}
           <button className="code-copy-btn" onClick={() => void copyCode()} type="button">
@@ -396,6 +431,44 @@ function parseDeveloperEditBlocks(content: string) {
 
   while ((match = codeBlockPattern.exec(content)) !== null) {
     const edit = parseDeveloperEditBlock("waey-edit", match[1] ?? "");
+
+    if (edit) {
+      edits.push(edit);
+    }
+  }
+
+  return edits;
+}
+
+function parseSpreadsheetEditBlock(language: string, content: string) {
+  if (language !== "waey-sheet-edit") {
+    return null;
+  }
+
+  try {
+    const value = JSON.parse(content);
+
+    if (typeof value?.path !== "string" || !value.path.trim()) {
+      return null;
+    }
+
+    if (!Array.isArray(value?.actions) || value.actions.length === 0) {
+      return null;
+    }
+
+    return content;
+  } catch {
+    return null;
+  }
+}
+
+function parseSpreadsheetEditBlocks(content: string) {
+  const edits: string[] = [];
+  const codeBlockPattern = /```waey-sheet-edit\n?([\s\S]*?)```/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockPattern.exec(content)) !== null) {
+    const edit = parseSpreadsheetEditBlock("waey-sheet-edit", match[1] ?? "");
 
     if (edit) {
       edits.push(edit);

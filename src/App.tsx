@@ -9,7 +9,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft, UiContextSnapshot } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen, captureCurrentUiContext } from "./features/capture";
-import { buildDeveloperContext, writeDeveloperFile } from "./features/dev";
+import { applyDeveloperSpreadsheetEdit, buildDeveloperContext, writeDeveloperFile } from "./features/dev";
 import { useConversationHistory } from "./features/history";
 import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
 import { usePersonas } from "./features/personas";
@@ -141,7 +141,7 @@ function MainOverlay() {
     const contexts: UiContextSnapshot[] = [];
 
     if (settings.attachUiContext) {
-      const freshContext = await captureCurrentUiContext().catch((error) => {
+      const freshContext = await captureCurrentUiContext(settings.developerModeEnabled).catch((error) => {
         setCaptureError(error instanceof Error ? error.message : String(error));
         return null;
       });
@@ -235,6 +235,32 @@ function MainOverlay() {
         const message = error instanceof Error ? error.message : String(error);
         setDeveloperEditStatus({
           label: "Edit blocked",
+          detail: message,
+          kind: "blocked",
+        });
+        setCaptureError(message);
+      });
+  }
+
+  async function applySpreadsheetEdit(content: string) {
+    const approved = settings.developerAccessLevel === "auto" || window.confirm("Apply this spreadsheet edit?");
+
+    if (!approved) {
+      return;
+    }
+
+    await applyDeveloperSpreadsheetEdit(content, approved)
+      .then(() => {
+        setDeveloperEditStatus({
+          label: "Applied spreadsheet edit",
+          detail: "Workbook updated",
+          kind: "applied",
+        });
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setDeveloperEditStatus({
+          label: "Spreadsheet edit blocked",
           detail: message,
           kind: "blocked",
         });
@@ -367,6 +393,7 @@ function MainOverlay() {
                 developerEditStatus={developerEditStatus}
                 onEditLastUserMessage={editLastUserMessageWithDeveloperContext}
                 onApplyDeveloperEdit={applyDeveloperEdit}
+                onApplySpreadsheetEdit={applySpreadsheetEdit}
                 onRemoveCapture={removeCapture}
                 streamState={streamState}
                 isRtl={isRtl}

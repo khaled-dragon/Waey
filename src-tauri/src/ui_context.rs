@@ -14,6 +14,8 @@ pub struct UiContextSnapshot {
     pub platform: String,
     pub active_window_title: Option<String>,
     pub active_app_name: Option<String>,
+    pub selected_text: Option<String>,
+    pub selected_text_source: Option<String>,
     pub captured_at: u128,
     pub region: Option<UiContextRect>,
     pub elements: Vec<UiElementSummary>,
@@ -41,12 +43,15 @@ pub struct UiElementSummary {
     pub under_cursor: bool,
 }
 
-pub fn capture_ui_context(region: Option<UiContextRect>) -> Option<UiContextSnapshot> {
+pub fn capture_ui_context(
+    region: Option<UiContextRect>,
+    allow_clipboard_selection: bool,
+) -> Option<UiContextSnapshot> {
     if !cfg!(target_os = "windows") {
         return None;
     }
 
-    let stdout = run_uia_script_hidden(UIA_SCRIPT, UI_CONTEXT_TIMEOUT)?;
+    let stdout = run_uia_script_hidden(UIA_SCRIPT, UI_CONTEXT_TIMEOUT, allow_clipboard_selection)?;
     let mut snapshot =
         serde_json::from_str::<UiContextSnapshot>(stdout.trim_start_matches('\u{feff}')).ok()?;
     snapshot.captured_at = timestamp_millis();
@@ -56,7 +61,11 @@ pub fn capture_ui_context(region: Option<UiContextRect>) -> Option<UiContextSnap
     Some(snapshot)
 }
 
-fn run_uia_script_hidden(script: &str, timeout: Duration) -> Option<String> {
+fn run_uia_script_hidden(
+    script: &str,
+    timeout: Duration,
+    allow_clipboard_selection: bool,
+) -> Option<String> {
     let run_id = format!("{}_{}", std::process::id(), timestamp_millis());
     let script_path = temp_file_path(&run_id, "ps1");
     let runner_path = temp_file_path(&run_id, "vbs");
@@ -64,7 +73,11 @@ fn run_uia_script_hidden(script: &str, timeout: Duration) -> Option<String> {
 
     fs::create_dir_all(script_path.parent()?).ok()?;
     fs::write(&script_path, powershell_file_content(script)).ok()?;
-    fs::write(&runner_path, vbs_runner_content(&script_path, &output_path)).ok()?;
+    fs::write(
+        &runner_path,
+        vbs_runner_content(&script_path, &output_path, allow_clipboard_selection),
+    )
+    .ok()?;
 
     let output = run_wscript_hidden(&runner_path, timeout);
     let json = output
@@ -119,18 +132,23 @@ fn temp_file_path(run_id: &str, extension: &str) -> PathBuf {
 }
 
 fn powershell_file_content(script: &str) -> String {
-    format!("param([string]$OutputFile)\n{script}")
+    format!("param([string]$OutputFile, [bool]$AllowClipboardSelection = $false)\n{script}")
 }
 
-fn vbs_runner_content(script_path: &PathBuf, output_path: &PathBuf) -> String {
+fn vbs_runner_content(
+    script_path: &PathBuf,
+    output_path: &PathBuf,
+    allow_clipboard_selection: bool,
+) -> String {
     let powershell_path = std::env::var("SystemRoot")
         .map(|root| format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"))
         .unwrap_or_else(|_| "powershell.exe".to_string());
     let command = format!(
-        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\"",
+        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\" -AllowClipboardSelection ${}",
         powershell_path,
         script_path.display(),
-        output_path.display()
+        output_path.display(),
+        if allow_clipboard_selection { "true" } else { "false" }
     );
 
     format!(
@@ -257,6 +275,28 @@ function Get-SelectedText($element, [string]$role) {
   }
 }
 
+function Get-ClipboardSelectedText {
+  $originalClipboard = $null
+  try { $originalClipboard = [System.Windows.Forms.Clipboard]::GetDataObject() } catch {}
+
+  try {
+    [System.Windows.Forms.SendKeys]::SendWait('^c')
+    Start-Sleep -Milliseconds 90
+
+    if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+      return Clean-Text ([System.Windows.Forms.Clipboard]::GetText()) 1200
+    }
+
+    return $null
+  } catch {
+    return $null
+  } finally {
+    if ($null -ne $originalClipboard) {
+      try { [System.Windows.Forms.Clipboard]::SetDataObject($originalClipboard, $true) } catch {}
+    }
+  }
+}
+
 function Convert-Element($element, $cursorX, $cursorY) {
   try {
     if ($element.Current.IsOffscreen) { return $null }
@@ -361,6 +401,8 @@ $activeElement = Get-ContextRoot
 
 $activeWindowTitle = $null
 $activeAppName = $null
+$selectedText = $null
+$selectedTextSource = $null
 $elements = @()
 
 if ($null -ne $activeElement) {
@@ -370,12 +412,30 @@ if ($null -ne $activeElement) {
     $activeAppName = (Get-Process -Id $processIdValue -ErrorAction SilentlyContinue).ProcessName
   } catch {}
   $elements = Walk-Elements $activeElement $cursorPoint.X $cursorPoint.Y
+
+  foreach ($item in $elements) {
+    if (-not [string]::IsNullOrWhiteSpace($item.selectedText)) {
+      $selectedText = $item.selectedText
+      $selectedTextSource = 'uia'
+      break
+    }
+  }
+}
+
+if ($AllowClipboardSelection -and [string]::IsNullOrWhiteSpace($selectedText)) {
+  $clipboardSelection = Get-ClipboardSelectedText
+  if (-not [string]::IsNullOrWhiteSpace($clipboardSelection)) {
+    $selectedText = $clipboardSelection
+    $selectedTextSource = 'clipboard'
+  }
 }
 
 $snapshot = [PSCustomObject]@{
   platform = 'windows'
   activeWindowTitle = $activeWindowTitle
   activeAppName = $activeAppName
+  selectedText = $selectedText
+  selectedTextSource = $selectedTextSource
   capturedAt = 0
   region = $null
   elements = $elements

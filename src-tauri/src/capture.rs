@@ -61,7 +61,7 @@ pub fn capture_full_screen(include_ui_context: bool) -> Result<ScreenCapture, St
         source: CaptureSource::FullScreen,
         created_at,
         ui_context: include_ui_context
-            .then(|| capture_ui_context(None))
+            .then(|| capture_ui_context(None, false))
             .flatten(),
     })
 }
@@ -100,7 +100,7 @@ pub fn capture_screen_region(
         source: CaptureSource::Region,
         created_at,
         ui_context: include_ui_context
-            .then(|| capture_ui_context(Some(ui_region)))
+            .then(|| capture_ui_context(Some(ui_region), false))
             .flatten(),
     })
 }

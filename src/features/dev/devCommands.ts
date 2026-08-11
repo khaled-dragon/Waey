@@ -18,3 +18,9 @@ export function writeDeveloperFile(path: string, content: string, approved: bool
     request: { path, content, approved },
   });
 }
+
+export function applyDeveloperSpreadsheetEdit(content: string, approved: boolean) {
+  return invoke<void>("apply_developer_spreadsheet_edit", {
+    request: { content, approved },
+  });
+}
