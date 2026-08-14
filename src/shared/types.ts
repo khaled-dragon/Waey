@@ -108,15 +108,31 @@ export interface ScreenCapture {
 
 export interface UiContextSnapshot {
   schemaVersion: number;
-  platform: "windows";
+  platform: "windows" | "macos" | "linux";
   activeWindowTitle?: string | null;
   activeAppName?: string | null;
   selectedText?: string | null;
   selectedTextSource?: string | null;
   capturedAt: number;
   region?: CaptureRect | null;
+  cursor?: ScreenContextPoint | null;
+  activeWindowBounds?: CaptureRect | null;
+  focusedElement?: UiElementSummary | null;
+  pointedElement?: UiElementSummary | null;
+  visibleWindows?: VisibleWindowSummary[];
   elements: UiElementSummary[];
   diagnostics: ScreenContextDiagnostics;
+}
+
+export interface ScreenContextPoint {
+  x: number;
+  y: number;
+}
+
+export interface VisibleWindowSummary {
+  title: string;
+  appName?: string | null;
+  bounds: CaptureRect;
 }
 
 export type ScreenIntelligenceMode = "compatibility" | "shadow" | "enabled";
@@ -138,9 +154,15 @@ export interface UiElementSummary {
   value?: string | null;
   selectedText?: string | null;
   automationId?: string | null;
+  className?: string | null;
   bounds: CaptureRect;
   focused: boolean;
   underCursor: boolean;
+  isEnabled?: boolean;
+  isOffscreen?: boolean;
+  depth?: number;
+  childCount?: number;
+  parentTrail?: string[];
 }
 
 export interface ScreenCaptureError {

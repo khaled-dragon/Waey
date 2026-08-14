@@ -1,5 +1,13 @@
 # Waey Screen Intelligence and Developer Agent Plan
 
+## Delivery Tracker
+
+- [x] Task 1: Establish the versioned Screen Intelligence contracts, diagnostics, and rollout modes. Commit: `3faf5ad`.
+- [x] Task 2: Rebuild the bounded Windows UIA collector with normalization, sensitive-data filtering, and richer screen metadata.
+- [ ] Task 3: Route fresh screen context and screenshots independently through the provider request pipeline.
+- [ ] Task 4: Build the stateful Guide Mode overlay, mascot targeting, confirmation, and recapture loop.
+- [ ] Task 5: Harden Developer Mode context, selected-text capture, workspace actions, and cross-platform fallback behavior.
+
 ## Purpose
 
 Build a reliable, privacy-aware screen intelligence and developer workflow for Waey. The result should let supported models understand the active desktop through both a readable accessibility tree and an optional screenshot, guide a user through multi-step tasks, and safely read or edit explicitly approved local workspaces.

@@ -1,3 +1,13 @@
+mod model;
+mod normalizer;
+mod windows_uia;
+
+pub use model::{
+    ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
+    UiElementSummary, VisibleWindowSummary,
+};
+pub use windows_uia::capture_windows_ui_context;
+
 use serde::{Deserialize, Serialize};
 
 pub const SCREEN_CONTEXT_SCHEMA_VERSION: u8 = 2;
@@ -18,30 +28,6 @@ pub enum ScreenContextCollectionStatus {
     Complete,
     Partial,
     Unavailable,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScreenContextDiagnostics {
-    pub mode: ScreenIntelligenceMode,
-    pub status: ScreenContextCollectionStatus,
-    pub elapsed_ms: u64,
-    pub element_count: usize,
-    pub truncated: bool,
-    pub warnings: Vec<String>,
-}
-
-impl Default for ScreenContextDiagnostics {
-    fn default() -> Self {
-        Self {
-            mode: current_mode(),
-            status: ScreenContextCollectionStatus::Complete,
-            elapsed_ms: 0,
-            element_count: 0,
-            truncated: false,
-            warnings: Vec::new(),
-        }
-    }
 }
 
 pub fn current_mode() -> ScreenIntelligenceMode {
