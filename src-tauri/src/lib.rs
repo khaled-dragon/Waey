@@ -5,6 +5,7 @@ mod llm;
 mod logger;
 mod personas;
 mod providers;
+mod screen_intelligence;
 mod settings;
 mod spreadsheet;
 mod storage;

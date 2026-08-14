@@ -107,6 +107,7 @@ export interface ScreenCapture {
 }
 
 export interface UiContextSnapshot {
+  schemaVersion: number;
   platform: "windows";
   activeWindowTitle?: string | null;
   activeAppName?: string | null;
@@ -115,6 +116,20 @@ export interface UiContextSnapshot {
   capturedAt: number;
   region?: CaptureRect | null;
   elements: UiElementSummary[];
+  diagnostics: ScreenContextDiagnostics;
+}
+
+export type ScreenIntelligenceMode = "compatibility" | "shadow" | "enabled";
+
+export type ScreenContextCollectionStatus = "complete" | "partial" | "unavailable";
+
+export interface ScreenContextDiagnostics {
+  mode: ScreenIntelligenceMode;
+  status: ScreenContextCollectionStatus;
+  elapsedMs: number;
+  elementCount: number;
+  truncated: boolean;
+  warnings: string[];
 }
 
 export interface UiElementSummary {

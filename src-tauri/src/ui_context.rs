@@ -1,3 +1,6 @@
+use crate::screen_intelligence::{
+    collection_diagnostics, ScreenContextDiagnostics, SCREEN_CONTEXT_SCHEMA_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -11,6 +14,8 @@ const UI_CONTEXT_TIMEOUT: Duration = Duration::from_millis(750);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiContextSnapshot {
+    #[serde(default)]
+    pub schema_version: u8,
     pub platform: String,
     pub active_window_title: Option<String>,
     pub active_app_name: Option<String>,
@@ -19,6 +24,8 @@ pub struct UiContextSnapshot {
     pub captured_at: u128,
     pub region: Option<UiContextRect>,
     pub elements: Vec<UiElementSummary>,
+    #[serde(default)]
+    pub diagnostics: ScreenContextDiagnostics,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,12 +58,21 @@ pub fn capture_ui_context(
         return None;
     }
 
+    let started_at = Instant::now();
     let stdout = run_uia_script_hidden(UIA_SCRIPT, UI_CONTEXT_TIMEOUT, allow_clipboard_selection)?;
     let mut snapshot =
         serde_json::from_str::<UiContextSnapshot>(stdout.trim_start_matches('\u{feff}')).ok()?;
+    let filtered_elements = filter_elements(snapshot.elements, region.as_ref());
+
+    snapshot.schema_version = SCREEN_CONTEXT_SCHEMA_VERSION;
     snapshot.captured_at = timestamp_millis();
-    snapshot.region = region.clone();
-    snapshot.elements = filter_elements(snapshot.elements, region);
+    snapshot.region = region;
+    snapshot.diagnostics = collection_diagnostics(
+        started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        filtered_elements.elements.len(),
+        filtered_elements.truncated,
+    );
+    snapshot.elements = filtered_elements.elements;
 
     Some(snapshot)
 }
@@ -157,10 +173,15 @@ fn vbs_runner_content(
     )
 }
 
+struct FilteredElements {
+    elements: Vec<UiElementSummary>,
+    truncated: bool,
+}
+
 fn filter_elements(
     elements: Vec<UiElementSummary>,
-    region: Option<UiContextRect>,
-) -> Vec<UiElementSummary> {
+    region: Option<&UiContextRect>,
+) -> FilteredElements {
     let mut filtered = elements
         .into_iter()
         .filter(|element| {
@@ -171,15 +192,19 @@ fn filter_elements(
         .filter(|element| element.bounds.width > 0 && element.bounds.height > 0)
         .filter(|element| {
             region
-                .as_ref()
                 .map(|rect| intersects(&element.bounds, rect))
                 .unwrap_or(true)
         })
         .collect::<Vec<_>>();
 
     filtered.sort_by_key(element_priority);
+    let truncated = filtered.len() > MAX_UI_ELEMENTS;
     filtered.truncate(MAX_UI_ELEMENTS);
-    filtered
+
+    FilteredElements {
+        elements: filtered,
+        truncated,
+    }
 }
 
 fn element_priority(element: &UiElementSummary) -> u8 {
