@@ -6,7 +6,7 @@ import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft, UiContextSnapshot } from "./shared/types";
+import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen, captureCurrentUiContext } from "./features/capture";
 import { applyDeveloperSpreadsheetEdit, buildDeveloperContext, writeDeveloperFile } from "./features/dev";
@@ -138,8 +138,6 @@ function MainOverlay() {
   }
 
   async function freshPromptUiContexts() {
-    const contexts: UiContextSnapshot[] = [];
-
     if (settings.attachUiContext) {
       const freshContext = await captureCurrentUiContext(settings.developerModeEnabled).catch((error) => {
         setCaptureError(error instanceof Error ? error.message : String(error));
@@ -147,21 +145,15 @@ function MainOverlay() {
       });
 
       if (freshContext) {
-        contexts.push(freshContext);
+        return [freshContext];
       }
     }
 
-    for (const context of latestUiContexts) {
-      if (contexts.length >= 3) {
-        break;
-      }
+    const latestContext = latestUiContexts
+      .slice()
+      .sort((left, right) => right.capturedAt - left.capturedAt)[0];
 
-      if (!contexts.some((existing) => existing.capturedAt === context.capturedAt)) {
-        contexts.push(context);
-      }
-    }
-
-    return contexts;
+    return latestContext ? [latestContext] : [];
   }
 
   async function promptWithDeveloperContext(prompt: string) {

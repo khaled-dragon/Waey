@@ -8,6 +8,7 @@ export interface LlmProvider {
   apiKey: string;
   model: string;
   managed: boolean;
+  supportsVision: boolean;
 }
 
 export interface ProviderDraft {
@@ -17,6 +18,7 @@ export interface ProviderDraft {
   baseUrl: string;
   apiKey: string;
   model: string;
+  supportsVision: boolean;
 }
 
 export interface ManagedProviderUpdate {

@@ -27,9 +27,11 @@ export function sendLlmPrompt({
   historyMessages,
 }: SendPromptInput) {
   const attachedCapturePaths = captures?.map((attachedCapture) => attachedCapture.path) ?? capturePaths ?? [];
-  const attachedUiContexts = uiContexts ?? captures
+  const attachedUiContext = (uiContexts ?? captures
     ?.map((attachedCapture) => attachedCapture.uiContext)
-    .filter((uiContext) => uiContext !== null && uiContext !== undefined);
+    .filter((uiContext) => uiContext !== null && uiContext !== undefined))
+    ?.slice()
+    .sort((left, right) => right.capturedAt - left.capturedAt)[0];
 
   return invoke<void>("send_llm_prompt", {
     request: {
@@ -39,7 +41,7 @@ export function sendLlmPrompt({
       personaPrompt: persona?.prompt ?? null,
       capturePath: capture?.path ?? capturePath ?? null,
       capturePaths: attachedCapturePaths.length > 0 ? attachedCapturePaths : undefined,
-      uiContexts: attachedUiContexts,
+      uiContexts: attachedUiContext ? [attachedUiContext] : undefined,
       historyMessages: historyMessages.map((message) => ({
         role: message.role,
         content: message.content,

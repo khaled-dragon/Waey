@@ -82,6 +82,7 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
                 api_key text not null,
                 model text not null,
                 managed integer not null default 0,
+                supports_vision integer not null default 0,
                 created_at integer not null,
                 updated_at integer not null
             );
@@ -129,6 +130,33 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
         "managed",
         "alter table llm_providers add column managed integer not null default 0",
     )?;
+
+    let supports_vision_added = ensure_column(
+        connection,
+        "llm_providers",
+        "supports_vision",
+        "alter table llm_providers add column supports_vision integer not null default 0",
+    )?;
+    if supports_vision_added {
+        connection
+            .execute(
+                "update llm_providers
+                 set supports_vision = 1
+                 where managed = 1
+                    or lower(model) like '%vision%'
+                    or lower(model) like '%-vl%'
+                    or lower(model) like '%llava%'
+                    or lower(model) like '%internvl%'
+                    or lower(model) like '%llama-4%'
+                    or lower(model) like '%gemini%'
+                    or lower(model) like '%gpt-4o%'
+                    or lower(model) like '%claude-3%'
+                    or lower(model) like '%claude-4%'",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
     ensure_column(
         connection,
         "conversations",
@@ -150,7 +178,7 @@ fn ensure_column(
     table_name: &str,
     column_name: &str,
     alter_statement: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let mut statement = connection
         .prepare(&format!("pragma table_info({table_name})"))
         .map_err(|error| error.to_string())?;
@@ -161,12 +189,12 @@ fn ensure_column(
         .map_err(|error| error.to_string())?;
 
     if columns.iter().any(|column| column == column_name) {
-        return Ok(());
+        return Ok(false);
     }
 
     connection
         .execute(alter_statement, [])
         .map_err(|error| error.to_string())?;
 
-    Ok(())
+    Ok(true)
 }

@@ -9,7 +9,7 @@ interface ProviderManagerProps {
   onSelectProvider: (providerId: string) => void;
 }
 
-const initialDraft: ProviderDraft = { name: "", kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "", model: "" };
+const initialDraft: ProviderDraft = { name: "", kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "", model: "", supportsVision: false };
 
 function defaultBaseUrl(kind: ProviderKind) {
   if (kind === "ollama") return "http://localhost:11434/v1";
@@ -37,7 +37,7 @@ export function ProviderManager({ providers, selectedProviderId, onDeleteProvide
     }
   }
 
-  function update(field: keyof ProviderDraft, value: string) {
+  function update<K extends keyof ProviderDraft>(field: K, value: ProviderDraft[K]) {
     setDraft((d) => ({ ...d, [field]: value }));
   }
 
@@ -66,6 +66,13 @@ export function ProviderManager({ providers, selectedProviderId, onDeleteProvide
           <input className="form-input" placeholder="Model ID" value={draft.model} onChange={(e) => update("model", e.currentTarget.value)} />
           <input className="form-input" placeholder="API Key" type="password" value={draft.apiKey} onChange={(e) => update("apiKey", e.currentTarget.value)} />
         </div>
+        <label className="toggle-row">
+          <div>
+            <div className="toggle-title">Vision support</div>
+            <div className="toggle-desc">Send attached screenshots to this model.</div>
+          </div>
+          <input className="setting-switch" checked={draft.supportsVision} onChange={(e) => update("supportsVision", e.currentTarget.checked)} type="checkbox" />
+        </label>
         {errorMessage && <div className="error-inline">{errorMessage}</div>}
         <button className="btn-primary" disabled={isSaving} type="submit">{isSaving ? "Saving..." : "Save Provider"}</button>
       </form>

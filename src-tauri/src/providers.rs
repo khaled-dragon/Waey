@@ -24,6 +24,7 @@ pub struct LlmProvider {
     pub api_key: String,
     pub model: String,
     pub managed: bool,
+    pub supports_vision: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,6 +44,8 @@ pub struct ProviderDraft {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default)]
+    pub supports_vision: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,6 +66,8 @@ struct ManagedProviderPayload {
     api_key: String,
     model: String,
     managed: bool,
+    #[serde(default)]
+    supports_vision: Option<bool>,
     message: Option<String>,
     revision: Option<u64>,
 }
@@ -71,7 +76,7 @@ pub fn list_providers(app: &AppHandle) -> Result<Vec<LlmProvider>, String> {
     let connection = open_app_database(app)?;
     let mut statement = connection
         .prepare(
-            "select id, name, kind, base_url, api_key, model, managed
+            "select id, name, kind, base_url, api_key, model, managed, supports_vision
              from llm_providers
              order by managed desc, updated_at desc",
         )
@@ -87,6 +92,7 @@ pub fn list_providers(app: &AppHandle) -> Result<Vec<LlmProvider>, String> {
                 api_key: row.get(4)?,
                 model: row.get(5)?,
                 managed: row.get::<_, i64>(6)? == 1,
+                supports_vision: row.get::<_, i64>(7)? == 1,
             })
         })
         .map_err(|error| error.to_string())?
@@ -107,19 +113,23 @@ pub fn save_provider(app: &AppHandle, draft: ProviderDraft) -> Result<LlmProvide
         api_key: draft.api_key.trim().to_string(),
         model: draft.model.trim().to_string(),
         managed: false,
+        supports_vision: draft
+            .supports_vision
+            .unwrap_or_else(|| inferred_vision_support(&draft.model, false)),
     };
     let connection = open_app_database(app)?;
 
     connection
         .execute(
-            "insert into llm_providers (id, name, kind, base_url, api_key, model, managed, created_at, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, 0, strftime('%s','now'), strftime('%s','now'))
+            "insert into llm_providers (id, name, kind, base_url, api_key, model, managed, supports_vision, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, strftime('%s','now'), strftime('%s','now'))
              on conflict(id) do update set
                name = excluded.name,
                kind = excluded.kind,
                base_url = excluded.base_url,
                api_key = excluded.api_key,
                model = excluded.model,
+               supports_vision = excluded.supports_vision,
                updated_at = strftime('%s','now')",
             params![
                 &provider.id,
@@ -127,7 +137,8 @@ pub fn save_provider(app: &AppHandle, draft: ProviderDraft) -> Result<LlmProvide
                 provider_kind_to_string(&provider.kind),
                 &provider.base_url,
                 &provider.api_key,
-                &provider.model
+                &provider.model,
+                bool_to_integer(provider.supports_vision)
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -236,6 +247,9 @@ fn managed_provider_from_payload(payload: ManagedProviderPayload) -> LlmProvider
         api_key: payload.api_key.trim().to_string(),
         model: payload.model.trim().to_string(),
         managed: payload.managed,
+        supports_vision: payload
+            .supports_vision
+            .unwrap_or_else(|| inferred_vision_support(&payload.model, payload.managed)),
     }
 }
 
@@ -256,7 +270,7 @@ fn current_managed_provider(app: &AppHandle) -> Result<Option<LlmProvider>, Stri
     let connection = open_app_database(app)?;
     let mut statement = connection
         .prepare(
-            "select id, name, kind, base_url, api_key, model, managed
+            "select id, name, kind, base_url, api_key, model, managed, supports_vision
              from llm_providers
              where id = ?1 and managed = 1",
         )
@@ -272,6 +286,7 @@ fn current_managed_provider(app: &AppHandle) -> Result<Option<LlmProvider>, Stri
                 api_key: row.get(4)?,
                 model: row.get(5)?,
                 managed: row.get::<_, i64>(6)? == 1,
+                supports_vision: row.get::<_, i64>(7)? == 1,
             })
         })
         .map_err(|error| error.to_string())?;
@@ -284,8 +299,8 @@ fn save_managed_provider(app: &AppHandle, provider: &LlmProvider) -> Result<(), 
 
     connection
         .execute(
-            "insert into llm_providers (id, name, kind, base_url, api_key, model, managed, created_at, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, 1, strftime('%s','now'), strftime('%s','now'))
+            "insert into llm_providers (id, name, kind, base_url, api_key, model, managed, supports_vision, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, strftime('%s','now'), strftime('%s','now'))
              on conflict(id) do nothing",
             params![
                 &provider.id,
@@ -293,7 +308,8 @@ fn save_managed_provider(app: &AppHandle, provider: &LlmProvider) -> Result<(), 
                 provider_kind_to_string(&provider.kind),
                 &provider.base_url,
                 &provider.api_key,
-                &provider.model
+                &provider.model,
+                bool_to_integer(provider.supports_vision)
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -306,8 +322,8 @@ fn upsert_managed_provider(app: &AppHandle, provider: &LlmProvider) -> Result<()
 
     connection
         .execute(
-            "insert into llm_providers (id, name, kind, base_url, api_key, model, managed, created_at, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, 1, strftime('%s','now'), strftime('%s','now'))
+            "insert into llm_providers (id, name, kind, base_url, api_key, model, managed, supports_vision, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, strftime('%s','now'), strftime('%s','now'))
              on conflict(id) do update set
                name = excluded.name,
                kind = excluded.kind,
@@ -315,6 +331,7 @@ fn upsert_managed_provider(app: &AppHandle, provider: &LlmProvider) -> Result<()
                api_key = excluded.api_key,
                model = excluded.model,
                managed = 1,
+               supports_vision = excluded.supports_vision,
                updated_at = strftime('%s','now')",
             params![
                 &provider.id,
@@ -322,7 +339,8 @@ fn upsert_managed_provider(app: &AppHandle, provider: &LlmProvider) -> Result<()
                 provider_kind_to_string(&provider.kind),
                 &provider.base_url,
                 &provider.api_key,
-                &provider.model
+                &provider.model,
+                bool_to_integer(provider.supports_vision)
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -336,6 +354,7 @@ fn same_provider_runtime(current: &LlmProvider, next: &LlmProvider) -> bool {
         && current.base_url == next.base_url
         && current.api_key == next.api_key
         && current.model == next.model
+        && current.supports_vision == next.supports_vision
 }
 
 fn validate_managed_provider(provider: &LlmProvider) -> Result<(), String> {
@@ -387,5 +406,29 @@ fn provider_kind_from_string(value: String) -> ProviderKind {
         "openrouter" => ProviderKind::Openrouter,
         "ollama" => ProviderKind::Ollama,
         _ => ProviderKind::Custom,
+    }
+}
+
+fn inferred_vision_support(model: &str, managed: bool) -> bool {
+    if managed {
+        return true;
+    }
+
+    let model = model.to_ascii_lowercase();
+    let explicit_vision_model = [
+        "vision", "-vl", "llava", "internvl", "llama-4", "gemini", "gpt-4o", "claude-3",
+        "claude-4", "pixtral",
+    ]
+    .iter()
+    .any(|pattern| model.contains(pattern));
+
+    explicit_vision_model
+}
+
+fn bool_to_integer(value: bool) -> i64 {
+    if value {
+        1
+    } else {
+        0
     }
 }

@@ -31,7 +31,7 @@ function defaultBaseUrl(kind: ProviderKind) {
   return "https://api.openai.com/v1";
 }
 
-const initialProviderDraft: ProviderDraft = { name: "", kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "", model: "" };
+const initialProviderDraft: ProviderDraft = { name: "", kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "", model: "", supportsVision: false };
 const initialPersonaDraft: PersonaDraft = { name: "", prompt: "" };
 
 export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, settings, providers, personas, selectedProviderId, selectedPersonaId, onSelectProvider, onSelectPersona, onSaveProvider, onDeleteProvider, onSavePersona, onDeletePersona, isRtl, updateState, onCheckForUpdate, onInstallUpdate }: SettingsPanelProps) {
@@ -83,6 +83,7 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
       model: provider.model,
+      supportsVision: provider.supportsVision,
     });
   }
 
@@ -256,6 +257,13 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
               <input className="form-input" placeholder={isRtl ? "نموذج" : "Model ID"} value={providerDraft.model} onChange={(e) => updateProviderDraft("model", e.currentTarget.value)} />
               <input className="form-input" placeholder="API Key" type="password" autoComplete="off" value={providerDraft.apiKey} onChange={(e) => updateProviderDraft("apiKey", e.currentTarget.value)} />
             </div>
+            <label className="toggle-row">
+              <div>
+                <div className="toggle-title">{isRtl ? "دعم الصور" : "Vision support"}</div>
+                <div className="toggle-desc">{isRtl ? "إرسال لقطات الشاشة لهذا النموذج" : "Send attached screenshots to this model."}</div>
+              </div>
+              <input className="setting-switch" checked={providerDraft.supportsVision} onChange={(e) => updateProviderDraft("supportsVision", e.currentTarget.checked)} type="checkbox" />
+            </label>
             {providerError && <div className="error-inline">{providerError}</div>}
             <button className="btn-primary" disabled={savingProvider} type="submit">{savingProvider ? "..." : (isRtl ? "حفظ المزود" : "Save Provider")}</button>
           </form>
