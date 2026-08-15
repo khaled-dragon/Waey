@@ -1,7 +1,8 @@
 use crate::settings::{get_settings, DeveloperAccessLevel};
+use crate::workspace::{is_protected_path, replace_file_transactionally, WorkspaceRegistry};
 use serde::Deserialize;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use tauri::AppHandle;
 use umya_spreadsheet::{new_file, reader, writer, Workbook, Worksheet};
 
@@ -22,6 +23,7 @@ pub struct DeveloperSpreadsheetEditRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SpreadsheetEditPlan {
+    workspace: Option<String>,
     path: String,
     actions: Vec<SpreadsheetAction>,
 }
@@ -62,11 +64,22 @@ enum CellInput {
 }
 
 #[tauri::command]
-pub fn apply_developer_spreadsheet_edit(
+pub async fn apply_developer_spreadsheet_edit(
     app: AppHandle,
     request: DeveloperSpreadsheetEditRequest,
 ) -> Result<(), String> {
-    let settings = get_settings(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        apply_developer_spreadsheet_edit_sync(&app, request)
+    })
+    .await
+    .map_err(|error| format!("Spreadsheet worker failed: {error}"))?
+}
+
+fn apply_developer_spreadsheet_edit_sync(
+    app: &AppHandle,
+    request: DeveloperSpreadsheetEditRequest,
+) -> Result<(), String> {
+    let settings = get_settings(app)?;
 
     if !settings.developer_mode_enabled {
         return Err("Developer Mode is not enabled.".to_string());
@@ -88,11 +101,12 @@ pub fn apply_developer_spreadsheet_edit(
         ));
     }
 
-    let workspaces = normalized_workspaces(&settings.developer_workspaces)?;
-    let target_path =
-        resolve_workbook_target(&PathBuf::from(clean_path_input(&plan.path)), &workspaces)?;
+    let workspaces = WorkspaceRegistry::from_settings(&settings.developer_workspaces)?;
+    let target_path = workspaces
+        .resolve_write_target(plan.workspace.as_deref(), &plan.path, true)?
+        .path;
 
-    if is_secret_path(&target_path) {
+    if is_protected_path(&target_path) {
         return Err("Waey will not edit secret-like files.".to_string());
     }
 
@@ -119,8 +133,23 @@ pub fn apply_developer_spreadsheet_edit(
         apply_action(&mut workbook, action)?;
     }
 
-    writer::xlsx::write(&workbook, &target_path)
+    let parent = target_path
+        .parent()
+        .ok_or_else(|| "Target workbook has no parent folder.".to_string())?;
+    let file_name = target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Target workbook has no valid name.".to_string())?;
+    let temporary_path = parent.join(format!(
+        ".{file_name}.{}.waey-tmp.xlsx",
+        uuid::Uuid::new_v4()
+    ));
+    let write_result = writer::xlsx::write(&workbook, &temporary_path)
         .map_err(|error| format!("Failed to write workbook: {error}"))
+        .and_then(|_| replace_file_transactionally(&temporary_path, &target_path));
+    let _ = fs::remove_file(temporary_path);
+
+    write_result
 }
 
 pub fn summarize_workbook(path: &Path) -> Result<String, String> {
@@ -304,80 +333,6 @@ fn set_cell_value_by_position(worksheet: &mut Worksheet, column: u32, row: u32, 
     };
 }
 
-fn resolve_workbook_target(
-    requested_path: &Path,
-    workspaces: &[PathBuf],
-) -> Result<PathBuf, String> {
-    if requested_path.as_os_str().is_empty() {
-        return Err("Target workbook path is required.".to_string());
-    }
-
-    if requested_path.exists() {
-        let target_path = fs::canonicalize(requested_path)
-            .map_err(|error| format!("Failed to resolve workbook: {error}"))?;
-
-        if !target_path.is_file() {
-            return Err("Target workbook path is not a file.".to_string());
-        }
-
-        if !workspaces
-            .iter()
-            .any(|workspace| target_path.starts_with(workspace))
-        {
-            return Err("Target workbook is outside the allowed workspaces.".to_string());
-        }
-
-        return Ok(target_path);
-    }
-
-    let parent = requested_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .ok_or_else(|| {
-            "New workbooks must include a parent folder inside an allowed workspace.".to_string()
-        })?;
-    let parent = fs::canonicalize(parent)
-        .map_err(|error| format!("Failed to resolve target folder: {error}"))?;
-
-    if !parent.is_dir() {
-        return Err("Target parent is not a folder.".to_string());
-    }
-
-    if !workspaces
-        .iter()
-        .any(|workspace| parent.starts_with(workspace))
-    {
-        return Err("Target folder is outside the allowed workspaces.".to_string());
-    }
-
-    let file_name = requested_path
-        .file_name()
-        .ok_or_else(|| "New workbook path is missing a file name.".to_string())?;
-
-    Ok(parent.join(file_name))
-}
-
-fn normalized_workspaces(values: &[String]) -> Result<Vec<PathBuf>, String> {
-    let mut workspaces = Vec::new();
-
-    for value in values {
-        let trimmed = clean_path_input(value);
-
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let path = fs::canonicalize(&trimmed)
-            .map_err(|error| format!("Failed to read workspace `{trimmed}`: {error}"))?;
-
-        if path.is_dir() && !workspaces.iter().any(|workspace| workspace == &path) {
-            workspaces.push(path);
-        }
-    }
-
-    Ok(workspaces)
-}
-
 fn validate_cell(cell: &str) -> Result<String, String> {
     let cell = cell.trim().to_ascii_uppercase();
 
@@ -408,35 +363,9 @@ fn validate_cell(cell: &str) -> Result<String, String> {
     Ok(cell)
 }
 
-fn clean_path_input(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'')
-        .trim()
-        .to_string()
-}
-
 fn is_xlsx_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.eq_ignore_ascii_case("xlsx"))
         .unwrap_or(false)
-}
-
-fn is_secret_path(path: &Path) -> bool {
-    path.components().any(|component| match component {
-        Component::Normal(value) => {
-            let value = value.to_string_lossy().to_ascii_lowercase();
-            value == ".env"
-                || value.starts_with(".env.")
-                || value.ends_with(".pem")
-                || value.ends_with(".key")
-                || value.ends_with(".pfx")
-                || value.ends_with(".p12")
-                || value.contains("secret")
-                || value.contains("credential")
-        }
-        _ => false,
-    })
 }

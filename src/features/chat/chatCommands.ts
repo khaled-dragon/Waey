@@ -9,6 +9,7 @@ interface SendPromptInput {
   capturePath?: string | null;
   capturePaths?: string[];
   uiContexts?: UiContextSnapshot[];
+  developerContext?: string | null;
   guideMode?: boolean;
   persona: Persona | null;
   requestId: string;
@@ -23,6 +24,7 @@ export function sendLlmPrompt({
   capturePath,
   capturePaths,
   uiContexts,
+  developerContext,
   guideMode = false,
   persona,
   requestId,
@@ -44,6 +46,7 @@ export function sendLlmPrompt({
       capturePath: capture?.path ?? capturePath ?? null,
       capturePaths: attachedCapturePaths.length > 0 ? attachedCapturePaths : undefined,
       uiContexts: attachedUiContext ? [attachedUiContext] : undefined,
+      developerContext: developerContext?.trim() || undefined,
       guideMode,
       historyMessages: historyMessages.map((message) => ({
         role: message.role,

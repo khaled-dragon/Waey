@@ -1,6 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DeveloperContextResponse, UiContextSnapshot } from "../../shared/types";
 
+export interface DeveloperFileAction {
+  workspace: string;
+  path: string;
+  content: string;
+  operation: "edit" | "create";
+  expectedSha256?: string | null;
+  overwrite?: boolean;
+}
+
 interface BuildDeveloperContextInput {
   approved: boolean;
   prompt: string;
@@ -13,9 +22,9 @@ export function buildDeveloperContext(input: BuildDeveloperContextInput) {
   });
 }
 
-export function writeDeveloperFile(path: string, content: string, approved: boolean) {
+export function writeDeveloperFile(action: DeveloperFileAction, approved: boolean) {
   return invoke<void>("write_developer_file", {
-    request: { path, content, approved },
+    request: { ...action, approved },
   });
 }
 

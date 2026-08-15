@@ -11,6 +11,7 @@ mod settings;
 mod spreadsheet;
 mod storage;
 mod ui_context;
+mod workspace;
 
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
 use dev_context::{build_developer_context, write_developer_file};

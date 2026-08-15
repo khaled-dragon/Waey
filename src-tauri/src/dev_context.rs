@@ -1,16 +1,23 @@
 use crate::settings::{get_settings, DeveloperAccessLevel};
 use crate::spreadsheet;
 use crate::ui_context::UiContextSnapshot;
+use crate::workspace::{
+    atomic_write_text, is_protected_path, looks_like_text_file, should_skip_workspace_path,
+    WorkspaceRegistry,
+};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 const MAX_SEARCH_ENTRIES: usize = 8_000;
 const MAX_ATTACHED_LINES: usize = 220;
 const MAX_ATTACHED_BYTES: usize = 28_000;
 const CONTEXT_RADIUS_LINES: usize = 110;
+const MAX_REPOSITORY_MAP_ENTRIES: usize = 72;
+const MAX_REPOSITORY_MAP_SCAN_ENTRIES: usize = 900;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,17 +66,38 @@ pub struct DeveloperLineRange {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeveloperFileWriteRequest {
+    pub workspace: Option<String>,
     pub path: String,
     pub content: String,
+    pub expected_sha256: Option<String>,
+    pub operation: DeveloperFileOperation,
+    #[serde(default)]
+    pub overwrite: bool,
     pub approved: bool,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeveloperFileOperation {
+    Edit,
+    Create,
+}
+
 #[tauri::command]
-pub fn build_developer_context(
+pub async fn build_developer_context(
     app: AppHandle,
     request: DeveloperContextRequest,
 ) -> Result<Option<DeveloperContextResponse>, String> {
-    let settings = get_settings(&app)?;
+    tauri::async_runtime::spawn_blocking(move || build_developer_context_sync(&app, request))
+        .await
+        .map_err(|error| format!("Developer context worker failed: {error}"))?
+}
+
+fn build_developer_context_sync(
+    app: &AppHandle,
+    request: DeveloperContextRequest,
+) -> Result<Option<DeveloperContextResponse>, String> {
+    let settings = get_settings(app)?;
 
     if !settings.developer_mode_enabled || settings.developer_workspaces.is_empty() {
         return Ok(None);
@@ -79,13 +107,15 @@ pub fn build_developer_context(
         return Err("Developer mode needs approval before reading workspace files.".to_string());
     }
 
-    let workspaces = normalized_workspaces(&settings.developer_workspaces)?;
+    let workspace_registry = WorkspaceRegistry::from_settings(&settings.developer_workspaces)?;
+    let workspaces = workspace_registry.roots();
 
-    if workspaces.is_empty() {
+    if workspace_registry.is_empty() {
         return Ok(None);
     }
 
     let mut warnings = Vec::new();
+    let repository_map = workspace_repository_map(workspaces);
     let active_title = active_window_title(&request.ui_contexts);
     let selected_text = selected_text_from_contexts(&request.ui_contexts);
     let requested_line = requested_line_number(&request.prompt);
@@ -101,8 +131,10 @@ pub fn build_developer_context(
                 active_title.as_deref(),
                 None,
                 None,
+                None,
                 selected_text.as_deref(),
                 &warnings,
+                &repository_map,
             ),
             file_path: None,
             status: developer_status(
@@ -122,7 +154,7 @@ pub fn build_developer_context(
     let mut matched_candidate = None;
 
     for candidate in &candidates {
-        if let Some(path) = find_file_in_workspaces(candidate, &workspaces, &mut warnings)? {
+        if let Some(path) = find_file_in_workspaces(candidate, workspaces, &mut warnings)? {
             matched_candidate = Some(candidate.clone());
             matched_path = Some(path);
             break;
@@ -140,8 +172,10 @@ pub fn build_developer_context(
                 active_title.as_deref(),
                 None,
                 None,
+                None,
                 selected_text.as_deref(),
                 &warnings,
+                &repository_map,
             ),
             file_path: None,
             status: developer_status(
@@ -170,6 +204,12 @@ pub fn build_developer_context(
         ));
     }
 
+    let workspace_root = workspace_registry
+        .root_for_path(&matched_path)
+        .ok_or_else(|| "Matched file is outside the approved workspace registry.".to_string())?;
+    let workspace_relative_path = matched_path
+        .strip_prefix(workspace_root)
+        .map_err(|error| error.to_string())?;
     let content;
     let mut attachment = None;
 
@@ -179,12 +219,14 @@ pub fn build_developer_context(
             "{}\n\nMatched spreadsheet: {}\n\n```text\n{}\n```",
             developer_context_header(
                 active_title.as_deref(),
-                Some(&matched_path),
+                Some(workspace_root),
+                Some(workspace_relative_path),
                 None,
                 selected_text.as_deref(),
                 &warnings,
+                &repository_map,
             ),
-            matched_path.display(),
+            workspace_relative_path.display(),
             spreadsheet_summary,
         );
     } else {
@@ -194,12 +236,14 @@ pub fn build_developer_context(
             "{}\n\nMatched file: {}\nAttached lines: {}-{} of {}\n\n```{}\n{}\n```",
             developer_context_header(
                 active_title.as_deref(),
-                Some(&matched_path),
+                Some(workspace_root),
+                Some(workspace_relative_path),
                 Some(&file_attachment),
                 selected_text.as_deref(),
                 &warnings,
+                &repository_map,
             ),
-            matched_path.display(),
+            workspace_relative_path.display(),
             file_attachment.start_line,
             file_attachment.end_line,
             file_attachment.total_lines,
@@ -230,11 +274,20 @@ pub fn build_developer_context(
 }
 
 #[tauri::command]
-pub fn write_developer_file(
+pub async fn write_developer_file(
     app: AppHandle,
     request: DeveloperFileWriteRequest,
 ) -> Result<(), String> {
-    let settings = get_settings(&app)?;
+    tauri::async_runtime::spawn_blocking(move || write_developer_file_sync(&app, request))
+        .await
+        .map_err(|error| format!("Developer file worker failed: {error}"))?
+}
+
+fn write_developer_file_sync(
+    app: &AppHandle,
+    request: DeveloperFileWriteRequest,
+) -> Result<(), String> {
+    let settings = get_settings(app)?;
 
     if !settings.developer_mode_enabled {
         return Err("Developer Mode is not enabled.".to_string());
@@ -248,99 +301,40 @@ pub fn write_developer_file(
         return Err("Waey will not write files larger than 512 KB.".to_string());
     }
 
-    let workspaces = normalized_workspaces(&settings.developer_workspaces)?;
-    let requested_path = PathBuf::from(clean_path_input(&request.path));
-    let target_path = resolve_write_target(&requested_path, &workspaces)?;
+    let workspaces = WorkspaceRegistry::from_settings(&settings.developer_workspaces)?;
+    let target = match &request.operation {
+        DeveloperFileOperation::Edit => {
+            workspaces.resolve_existing(request.workspace.as_deref(), &request.path)?
+        }
+        DeveloperFileOperation::Create => workspaces.resolve_write_target(
+            request.workspace.as_deref(),
+            &request.path,
+            request.overwrite,
+        )?,
+    };
 
-    if is_secret_path(&target_path) {
-        return Err("Waey will not edit secret-like files.".to_string());
+    if is_protected_path(&target.path) {
+        return Err("Waey will not edit protected or secret-like files.".to_string());
     }
 
-    if !looks_like_code_file(&target_path.to_string_lossy()) {
+    if !looks_like_text_file(&target.path) {
         return Err("Waey can only write developer text/code files.".to_string());
     }
 
-    fs::write(&target_path, request.content).map_err(|error| error.to_string())
-}
+    if matches!(&request.operation, DeveloperFileOperation::Edit) {
+        let expected_hash = request
+            .expected_sha256
+            .as_deref()
+            .filter(|hash| !hash.trim().is_empty())
+            .ok_or_else(|| "Existing file edits must include the current file hash.".to_string())?;
+        let current_content = fs::read(&target.path).map_err(|error| error.to_string())?;
 
-fn resolve_write_target(requested_path: &Path, workspaces: &[PathBuf]) -> Result<PathBuf, String> {
-    if requested_path.as_os_str().is_empty() {
-        return Err("Target file path is required.".to_string());
-    }
-
-    if requested_path.exists() {
-        let target_path = fs::canonicalize(requested_path)
-            .map_err(|error| format!("Failed to resolve target file: {error}"))?;
-
-        if !target_path.is_file() {
-            return Err("Target path is not a file.".to_string());
-        }
-
-        if !workspaces
-            .iter()
-            .any(|workspace| target_path.starts_with(workspace))
-        {
-            return Err("Target file is outside the allowed workspaces.".to_string());
-        }
-
-        return Ok(target_path);
-    }
-
-    let parent = requested_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .ok_or_else(|| {
-            "New files must include a parent folder inside an allowed workspace.".to_string()
-        })?;
-    let parent = fs::canonicalize(parent)
-        .map_err(|error| format!("Failed to resolve target folder: {error}"))?;
-
-    if !parent.is_dir() {
-        return Err("Target parent is not a folder.".to_string());
-    }
-
-    if !workspaces
-        .iter()
-        .any(|workspace| parent.starts_with(workspace))
-    {
-        return Err("Target folder is outside the allowed workspaces.".to_string());
-    }
-
-    let file_name = requested_path
-        .file_name()
-        .ok_or_else(|| "New file path is missing a file name.".to_string())?;
-
-    Ok(parent.join(file_name))
-}
-
-fn normalized_workspaces(values: &[String]) -> Result<Vec<PathBuf>, String> {
-    let mut workspaces = Vec::new();
-
-    for value in values {
-        let trimmed = clean_path_input(value);
-
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let path = fs::canonicalize(&trimmed)
-            .map_err(|error| format!("Failed to read workspace `{trimmed}`: {error}"))?;
-
-        if path.is_dir() && !workspaces.iter().any(|workspace| workspace == &path) {
-            workspaces.push(path);
+        if sha256_hex(&current_content) != expected_hash.trim().to_ascii_lowercase() {
+            return Err("This file changed after Waey read it. Refresh the context before applying an edit.".to_string());
         }
     }
 
-    Ok(workspaces)
-}
-
-fn clean_path_input(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'')
-        .trim()
-        .to_string()
+    atomic_write_text(&target.path, &request.content)
 }
 
 fn active_window_title(contexts: &[UiContextSnapshot]) -> Option<String> {
@@ -469,71 +463,12 @@ fn clean_candidate_token(value: &str) -> String {
 }
 
 fn looks_like_workspace_file(value: &str) -> bool {
-    looks_like_code_file(value)
+    looks_like_text_file(Path::new(value))
         || Path::new(value)
             .extension()
             .and_then(|extension| extension.to_str())
             .map(|extension| matches!(extension.to_ascii_lowercase().as_str(), "xlsx"))
             .unwrap_or(false)
-}
-
-fn looks_like_code_file(value: &str) -> bool {
-    let Some(extension) = Path::new(value)
-        .extension()
-        .and_then(|extension| extension.to_str())
-    else {
-        return false;
-    };
-
-    matches!(
-        extension.to_ascii_lowercase().as_str(),
-        "rs" | "ts"
-            | "tsx"
-            | "js"
-            | "jsx"
-            | "json"
-            | "css"
-            | "html"
-            | "md"
-            | "py"
-            | "go"
-            | "java"
-            | "cs"
-            | "cpp"
-            | "c"
-            | "h"
-            | "hpp"
-            | "toml"
-            | "yaml"
-            | "yml"
-            | "sql"
-            | "vue"
-            | "svelte"
-            | "astro"
-            | "php"
-            | "rb"
-            | "swift"
-            | "kt"
-            | "kts"
-            | "dart"
-            | "sh"
-            | "ps1"
-            | "lua"
-            | "r"
-            | "ex"
-            | "exs"
-            | "scala"
-            | "pl"
-            | "pm"
-            | "fs"
-            | "fsx"
-            | "clj"
-            | "cljs"
-            | "erl"
-            | "hrl"
-            | "zig"
-            | "dockerfile"
-    )
 }
 
 fn is_spreadsheet_file(path: &Path) -> bool {
@@ -570,17 +505,25 @@ fn find_file_in_workspaces(
 
             scanned += 1;
 
-            if should_skip_path(&path) {
+            let canonical_path = match fs::canonicalize(&path) {
+                Ok(path) if path.starts_with(workspace) && !is_protected_path(&path) => path,
+                _ => continue,
+            };
+            let relative_path = canonical_path
+                .strip_prefix(workspace)
+                .map_err(|error| error.to_string())?;
+
+            if !relative_path.as_os_str().is_empty() && should_skip_workspace_path(relative_path) {
                 continue;
             }
 
-            let metadata = match fs::metadata(&path) {
+            let metadata = match fs::metadata(&canonical_path) {
                 Ok(metadata) => metadata,
                 Err(_) => continue,
             };
 
             if metadata.is_dir() {
-                if let Ok(entries) = fs::read_dir(&path) {
+                if let Ok(entries) = fs::read_dir(&canonical_path) {
                     for entry in entries.flatten() {
                         queue.push_back(entry.path());
                     }
@@ -588,29 +531,19 @@ fn find_file_in_workspaces(
                 continue;
             }
 
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            let Some(name) = canonical_path.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
 
-            if is_secret_path(&path) {
-                continue;
-            }
-
-            let relative_path = workspace
-                .strip_prefix(workspace)
-                .ok()
-                .and_then(|_| path.strip_prefix(workspace).ok())
-                .map(|path| {
-                    path.to_string_lossy()
-                        .replace('\\', "/")
-                        .to_ascii_lowercase()
-                })
-                .unwrap_or_default();
+            let relative_path = relative_path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase();
 
             if relative_path.ends_with(&normalized_candidate) {
-                matches.push((0, path));
+                matches.push((0, canonical_path));
             } else if name.eq_ignore_ascii_case(&target_name) {
-                matches.push((1, path));
+                matches.push((1, canonical_path));
             }
         }
     }
@@ -628,6 +561,7 @@ fn find_file_in_workspaces(
 
 struct FileAttachment {
     content: String,
+    sha256: String,
     start_line: usize,
     end_line: usize,
     total_lines: usize,
@@ -638,8 +572,8 @@ fn read_file_attachment(
     requested_line: Option<usize>,
     selected_text: Option<&str>,
 ) -> Result<FileAttachment, String> {
-    if is_secret_path(path) {
-        return Err("Waey will not read secret-like files.".to_string());
+    if is_protected_path(path) {
+        return Err("Waey will not read protected or secret-like files.".to_string());
     }
 
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
@@ -677,6 +611,7 @@ fn read_file_attachment(
 
     Ok(FileAttachment {
         content: content.trim_end().to_string(),
+        sha256: sha256_hex(text.as_bytes()),
         start_line: start_index + 1,
         end_line: end_line.max(start_index + 1),
         total_lines,
@@ -685,10 +620,12 @@ fn read_file_attachment(
 
 fn developer_context_header(
     active_title: Option<&str>,
+    workspace_root: Option<&Path>,
     file_path: Option<&Path>,
     attachment: Option<&FileAttachment>,
     selected_text: Option<&str>,
     warnings: &[String],
+    repository_map: &[String],
 ) -> String {
     let mut lines = vec!["Developer workspace context attached.".to_string()];
 
@@ -696,8 +633,12 @@ fn developer_context_header(
         lines.push(format!("Active window: {title}"));
     }
 
+    if let Some(root) = workspace_root {
+        lines.push(format!("Workspace root: {}", root.display()));
+    }
+
     if let Some(path) = file_path {
-        lines.push(format!("Workspace file: {}", path.display()));
+        lines.push(format!("Workspace-relative file: {}", path.display()));
     }
 
     if let Some(attachment) = attachment {
@@ -705,6 +646,7 @@ fn developer_context_header(
             "Attached lines: {}-{} of {}",
             attachment.start_line, attachment.end_line, attachment.total_lines
         ));
+        lines.push(format!("Current SHA-256: {}", attachment.sha256));
     }
 
     if let Some(selected_text) = non_empty(selected_text) {
@@ -716,7 +658,73 @@ fn developer_context_header(
         lines.extend(warnings.iter().map(|warning| format!("- {warning}")));
     }
 
+    if !repository_map.is_empty() {
+        lines.push("Workspace map:".to_string());
+        lines.extend(repository_map.iter().map(|entry| format!("- {entry}")));
+    }
+
     lines.join("\n")
+}
+
+fn workspace_repository_map(workspaces: &[PathBuf]) -> Vec<String> {
+    let mut entries = Vec::new();
+    let mut scanned = 0usize;
+
+    for workspace in workspaces {
+        let mut queue = VecDeque::from([workspace.clone()]);
+
+        while let Some(path) = queue.pop_front() {
+            if scanned >= MAX_REPOSITORY_MAP_SCAN_ENTRIES
+                || entries.len() >= MAX_REPOSITORY_MAP_ENTRIES
+            {
+                return entries;
+            }
+
+            scanned += 1;
+
+            let canonical_path = match fs::canonicalize(&path) {
+                Ok(path) if path.starts_with(workspace) && !is_protected_path(&path) => path,
+                _ => continue,
+            };
+            let relative_path = match canonical_path.strip_prefix(workspace) {
+                Ok(path) if !path.as_os_str().is_empty() => path,
+                _ => continue,
+            };
+
+            if should_skip_workspace_path(relative_path) {
+                continue;
+            }
+
+            let metadata = match fs::metadata(&canonical_path) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+
+            if metadata.is_dir() {
+                if let Ok(children) = fs::read_dir(&canonical_path) {
+                    for child in children.flatten() {
+                        queue.push_back(child.path());
+                    }
+                }
+
+                if relative_path.components().count() <= 2 {
+                    entries.push(format!("{}/", relative_path.display()));
+                }
+                continue;
+            }
+
+            if looks_like_workspace_file(&relative_path.to_string_lossy())
+                || matches!(
+                    relative_path.file_name().and_then(|name| name.to_str()),
+                    Some("package.json" | "Cargo.toml" | "README.md" | "pyproject.toml" | "go.mod")
+                )
+            {
+                entries.push(relative_path.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+
+    entries
 }
 
 fn developer_status(
@@ -795,43 +803,9 @@ fn find_selected_text_line(lines: &[&str], selected_text: &str) -> Option<usize>
         .map(|index| index + 1)
 }
 
-fn should_skip_path(path: &Path) -> bool {
-    path.components().any(|component| match component {
-        Component::Normal(value) => {
-            let value = value.to_string_lossy().to_ascii_lowercase();
-            matches!(
-                value.as_str(),
-                ".git"
-                    | "node_modules"
-                    | "dist"
-                    | "build"
-                    | "target"
-                    | ".next"
-                    | ".turbo"
-                    | "coverage"
-                    | ".venv"
-                    | "__pycache__"
-            )
-        }
-        _ => false,
-    })
-}
-
-fn is_secret_path(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-
-    let lower_name = name.to_ascii_lowercase();
-
-    lower_name == ".env"
-        || lower_name.starts_with(".env.")
-        || lower_name.ends_with(".pem")
-        || lower_name.ends_with(".key")
-        || lower_name.ends_with(".pfx")
-        || lower_name.ends_with(".p12")
-        || lower_name.contains("secret")
-        || lower_name.contains("credential")
+fn sha256_hex(value: &[u8]) -> String {
+    let digest = Sha256::digest(value);
+    format!("{digest:x}")
 }
 
 fn language_from_path(path: &Path) -> &'static str {

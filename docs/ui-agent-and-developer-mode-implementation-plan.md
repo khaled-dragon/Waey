@@ -6,7 +6,7 @@
 - [x] Task 2: Rebuild the bounded Windows UIA collector with normalization, sensitive-data filtering, and richer screen metadata.
 - [x] Task 3: Route fresh screen context and screenshots independently through the provider request pipeline.
 - [x] Task 4: Build the stateful Guide Mode overlay, mascot targeting, confirmation, and recapture loop.
-- [ ] Task 5: Harden Developer Mode context, selected-text capture, workspace actions, and cross-platform fallback behavior.
+- [x] Task 5: Harden Developer Mode context, selected-text capture, workspace actions, and cross-platform fallback behavior.
 
 ## Purpose
 

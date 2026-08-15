@@ -32,6 +32,7 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 umya-spreadsheet = "3.0.1"
+sha2 = "0.10"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.10.1"

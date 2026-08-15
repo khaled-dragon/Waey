@@ -7,10 +7,10 @@ import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import type { DeveloperContextStatus, DeveloperEditStatus, GuideStep, PersonaDraft, ProviderDraft } from "./shared/types";
+import type { DeveloperContextStatus, DeveloperEditStatus, GuideStep, PersonaDraft, ProviderDraft, UiContextSnapshot } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen, captureCurrentUiContext } from "./features/capture";
-import { applyDeveloperSpreadsheetEdit, buildDeveloperContext, writeDeveloperFile } from "./features/dev";
+import { applyDeveloperSpreadsheetEdit, buildDeveloperContext, writeDeveloperFile, type DeveloperFileAction } from "./features/dev";
 import { useConversationHistory } from "./features/history";
 import { hideOverlayWindow, useOverlayShortcuts } from "./features/overlay";
 import { usePersonas } from "./features/personas";
@@ -140,9 +140,9 @@ function MainOverlay() {
     await captureCurrentScreen().catch(() => undefined);
   }
 
-  const freshPromptUiContexts = useCallback(async () => {
+  const freshPromptUiContexts = useCallback(async (allowClipboardSelection = false) => {
     if (settings.attachUiContext) {
-      const freshContext = await captureCurrentUiContext(settings.developerModeEnabled).catch((error) => {
+      const freshContext = await captureCurrentUiContext(allowClipboardSelection).catch((error) => {
         setCaptureError(error instanceof Error ? error.message : String(error));
         return null;
       });
@@ -157,7 +157,7 @@ function MainOverlay() {
       .sort((left, right) => right.capturedAt - left.capturedAt)[0];
 
     return latestContext ? [latestContext] : [];
-  }, [latestUiContexts, setCaptureError, settings.attachUiContext, settings.developerModeEnabled]);
+  }, [latestUiContexts, setCaptureError, settings.attachUiContext]);
 
   const continueGuide = useCallback(async (step: GuideStep) => {
     if (!selectedProvider) {
@@ -176,6 +176,7 @@ function MainOverlay() {
       selectedPersona,
       continuationPrompt,
       uiContexts,
+      null,
       true,
     );
   }, [clearCaptures, freshPromptUiContexts, selectedPersona, selectedProvider, submitPrompt]);
@@ -190,15 +191,19 @@ function MainOverlay() {
   });
 
   async function promptWithDeveloperContext(prompt: string) {
-    let requestPrompt = prompt;
     clearDeveloperStatuses();
-    const uiContexts = await freshPromptUiContexts();
+    let uiContexts = await freshPromptUiContexts();
+    let developerContext: string | null = null;
 
     if (settings.developerModeEnabled) {
       const approved = settings.developerAccessLevel !== "ask" || window.confirm("Allow Waey to read code context from your allowed workspaces for this prompt?");
 
       if (approved) {
-        const developerContext = await buildDeveloperContext({
+        if (shouldOfferClipboardSelection(prompt, uiContexts) && window.confirm("Waey could not read the current selection through UI accessibility. Allow it to briefly copy the selected text? Your clipboard will be restored.")) {
+          uiContexts = await freshPromptUiContexts(true);
+        }
+
+        const attachment = await buildDeveloperContext({
           approved,
           prompt,
           uiContexts,
@@ -207,14 +212,14 @@ function MainOverlay() {
           return null;
         });
 
-        if (developerContext?.content.trim()) {
-          requestPrompt = `${prompt}\n\n${developerContext.content}`;
-          setDeveloperContextStatus(developerContext.status);
+        if (attachment?.content.trim()) {
+          developerContext = attachment.content;
+          setDeveloperContextStatus(attachment.status);
         }
       }
     }
 
-    return { requestPrompt, uiContexts };
+    return { developerContext, uiContexts };
   }
 
   async function submitPromptWithDeveloperContext(prompt: string, guideMode = false) {
@@ -227,9 +232,9 @@ function MainOverlay() {
     if (guideMode) {
       beginGuide();
     }
-    const { requestPrompt, uiContexts } = await promptWithDeveloperContext(prompt);
+    const { developerContext, uiContexts } = await promptWithDeveloperContext(prompt);
 
-    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, requestPrompt, uiContexts, guideMode);
+    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, prompt, uiContexts, developerContext, guideMode);
   }
 
   async function editLastUserMessageWithDeveloperContext(messageId: string, prompt: string) {
@@ -239,23 +244,24 @@ function MainOverlay() {
     }
 
     setActivePanel("chat");
-    const { requestPrompt, uiContexts } = await promptWithDeveloperContext(prompt);
+    const { developerContext, uiContexts } = await promptWithDeveloperContext(prompt);
 
-    return editLastUserMessage(messageId, prompt, selectedProvider, selectedPersona, requestPrompt, uiContexts);
+    return editLastUserMessage(messageId, prompt, selectedProvider, selectedPersona, prompt, uiContexts, developerContext);
   }
 
-  async function applyDeveloperEdit(path: string, content: string) {
-    const approved = settings.developerAccessLevel === "auto" || window.confirm(`Apply this edit to ${path}?`);
+  async function applyDeveloperEdit(action: DeveloperFileAction) {
+    const verb = action.operation === "create" ? "Create" : "Apply this edit to";
+    const approved = settings.developerAccessLevel === "auto" || window.confirm(`${verb} ${action.path}?`);
 
     if (!approved) {
       return;
     }
 
-    await writeDeveloperFile(path, content, approved)
+    await writeDeveloperFile(action, approved)
       .then(() => {
         setDeveloperEditStatus({
-          label: "Applied edit",
-          detail: path,
+          label: action.operation === "create" ? "Created file" : "Applied edit",
+          detail: action.path,
           kind: "applied",
         });
       })
@@ -519,6 +525,23 @@ function MainOverlay() {
       )}
     </div>
   );
+}
+
+function shouldOfferClipboardSelection(prompt: string, contexts: UiContextSnapshot[]) {
+  const hasSelection = contexts.some((context) =>
+    Boolean(context.selectedText?.trim() || context.elements.some((element) => element.selectedText?.trim())),
+  );
+
+  if (hasSelection) {
+    return false;
+  }
+
+  const promptSuggestsSelection = /\b(select|selection|line|code|edit|fix)\b|حدد|المحدد|السطر|الكود/i.test(prompt);
+  const activeAppLooksLikeIde = contexts.some((context) =>
+    /code|cursor|windsurf|visual studio|jetbrains|idea/i.test(`${context.activeAppName ?? ""} ${context.activeWindowTitle ?? ""}`),
+  );
+
+  return promptSuggestsSelection || activeAppLooksLikeIde;
 }
 
 export default App;

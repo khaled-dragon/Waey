@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { capturePreviewUrl } from "../features/capture";
+import type { DeveloperFileAction } from "../features/dev";
 import { stripGuideBlocks } from "../features/guide";
 import type { ChatMessage, DeveloperAccessLevel, DeveloperContextStatus, DeveloperEditStatus, ScreenCapture, StreamState } from "../shared/types";
 
@@ -11,7 +12,7 @@ interface ResponsePanelProps {
   developerContextStatus: DeveloperContextStatus | null;
   developerEditStatus: DeveloperEditStatus | null;
   onEditLastUserMessage: (messageId: string, prompt: string) => Promise<void>;
-  onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
+  onApplyDeveloperEdit: (action: DeveloperFileAction) => Promise<void>;
   onApplySpreadsheetEdit: (content: string) => Promise<void>;
   onRemoveCapture: (path: string) => void;
   streamState: StreamState;
@@ -55,18 +56,18 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
       return;
     }
 
-    const developerEdits = parseDeveloperEditBlocks(lastAssistant.content);
+    const developerEdits = parseDeveloperFileActions(lastAssistant.content);
     const spreadsheetEdits = parseSpreadsheetEditBlocks(lastAssistant.content);
 
     for (const edit of developerEdits) {
-      const editKey = `${lastAssistant.id}:${edit.path}:${hashDeveloperEdit(edit.content)}`;
+      const editKey = `${lastAssistant.id}:${edit.operation}:${edit.workspace}:${edit.path}:${hashDeveloperEdit(edit.content)}`;
 
       if (appliedDeveloperEditsRef.current.has(editKey)) {
         continue;
       }
 
       appliedDeveloperEditsRef.current.add(editKey);
-      void onApplyDeveloperEdit(edit.path, edit.content);
+      void onApplyDeveloperEdit(edit);
     }
 
     for (const edit of spreadsheetEdits) {
@@ -285,7 +286,7 @@ function hashDeveloperEdit(content: string) {
 interface FormattedAssistantMessageProps {
   content: string;
   isRtl: boolean;
-  onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
+  onApplyDeveloperEdit: (action: DeveloperFileAction) => Promise<void>;
   onApplySpreadsheetEdit: (content: string) => Promise<void>;
   reasoningContent?: string;
 }
@@ -329,7 +330,7 @@ interface CodeBlockProps {
   content: string;
   isRtl: boolean;
   language: string;
-  onApplyDeveloperEdit: (path: string, content: string) => Promise<void>;
+  onApplyDeveloperEdit: (action: DeveloperFileAction) => Promise<void>;
   onApplySpreadsheetEdit: (content: string) => Promise<void>;
 }
 
@@ -358,7 +359,7 @@ function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit, onApplySpre
     setApplying(true);
 
     try {
-      await onApplyDeveloperEdit(developerEdit.path, developerEdit.content);
+      await onApplyDeveloperEdit(developerEdit);
     } finally {
       setApplying(false);
     }
@@ -403,35 +404,69 @@ function CodeBlock({ content, isRtl, language, onApplyDeveloperEdit, onApplySpre
   );
 }
 
-function parseDeveloperEditBlock(language: string, content: string) {
-  if (language !== "waey-edit") {
+function parseDeveloperEditBlock(language: string, content: string): DeveloperFileAction | null {
+  const operation = language === "waey-edit"
+    ? "edit"
+    : language === "waey-file-create"
+      ? "create"
+      : null;
+
+  if (!operation) {
     return null;
   }
 
   const lines = content.split(/\r?\n/);
-  const pathLine = lines[0]?.trim() ?? "";
+  const headers: Record<string, string> = {};
+  let contentStart = 0;
 
-  if (!pathLine.toLowerCase().startsWith("path:")) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? "";
+
+    if (!line) {
+      contentStart = index + 1;
+      break;
+    }
+
+    const separator = line.indexOf(":");
+
+    if (separator <= 0) {
+      contentStart = index;
+      break;
+    }
+
+    headers[line.slice(0, separator).trim().toLowerCase()] = line.slice(separator + 1).trim();
+    contentStart = index + 1;
+  }
+
+  const workspace = headers.workspace ?? "";
+  const path = headers.path ?? "";
+  const replacement = lines.slice(contentStart).join("\n");
+
+  if (!workspace || !path || !replacement.trim()) {
     return null;
   }
 
-  const path = pathLine.slice("path:".length).trim();
-  const replacement = lines.slice(1).join("\n");
+  if (operation === "edit") {
+    const expectedSha256 = headers.expectedsha256 ?? "";
 
-  if (!path || !replacement.trim()) {
-    return null;
+    if (!/^[a-f0-9]{64}$/i.test(expectedSha256)) {
+      return null;
+    }
+
+    return { workspace, path, content: replacement, operation, expectedSha256 };
   }
 
-  return { path, content: replacement };
+  const overwrite = headers.overwrite === "true";
+  return { workspace, path, content: replacement, operation, overwrite };
 }
 
-function parseDeveloperEditBlocks(content: string) {
-  const edits: Array<{ path: string; content: string }> = [];
-  const codeBlockPattern = /```waey-edit\n?([\s\S]*?)```/g;
+function parseDeveloperFileActions(content: string) {
+  const edits: DeveloperFileAction[] = [];
+  const codeBlockPattern = /```(waey-edit|waey-file-create)\n?([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
 
   while ((match = codeBlockPattern.exec(content)) !== null) {
-    const edit = parseDeveloperEditBlock("waey-edit", match[1] ?? "");
+    const edit = parseDeveloperEditBlock(match[1] ?? "", match[2] ?? "");
 
     if (edit) {
       edits.push(edit);
