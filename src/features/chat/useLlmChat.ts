@@ -52,6 +52,7 @@ export function useLlmChat({
       persona: Persona | null,
       requestPrompt?: string,
       uiContexts?: UiContextSnapshot[],
+      guideMode = false,
     ) => {
       const trimmedPrompt = prompt.trim();
       const trimmedRequestPrompt = (requestPrompt ?? prompt).trim();
@@ -105,6 +106,7 @@ export function useLlmChat({
           capture: captures[0] ?? null,
           captures,
           uiContexts,
+          guideMode,
           persona,
           requestId,
           historyMessages,
@@ -225,6 +227,7 @@ export function useLlmChat({
           capturePath: editedUserMessage.capturePath ?? null,
           capturePaths: editedUserMessage.capturePaths ?? [],
           uiContexts,
+          guideMode: false,
           persona,
           requestId,
           historyMessages,

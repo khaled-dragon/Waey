@@ -1,5 +1,6 @@
 mod capture;
 mod dev_context;
+mod guide;
 mod history;
 mod llm;
 mod logger;
@@ -13,6 +14,10 @@ mod ui_context;
 
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
 use dev_context::{build_developer_context, write_developer_file};
+use guide::{
+    cancel_guide as dismiss_guide, complete_guide_step as confirm_guide, show_guide_overlay,
+    GuideOverlayRequest, GUIDE_WINDOW_LABEL,
+};
 use history::{
     create_conversation, delete_conversation, delete_message, list_conversations, list_messages,
     rename_conversation, save_message, set_conversation_pin, ChatMessage, ChatMessageDraft,
@@ -117,6 +122,30 @@ fn capture_current_ui_context(
     restore_main_window(&app)?;
 
     Ok(context)
+}
+
+#[tauri::command]
+fn show_guide_step(app: AppHandle, request: GuideOverlayRequest) -> Result<(), String> {
+    hide_window_safely(&app, MAIN_WINDOW_LABEL);
+
+    if let Err(error) = show_guide_overlay(&app, request) {
+        let _ = restore_main_window(&app);
+        return Err(error);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn complete_guide_step(app: AppHandle) -> Result<(), String> {
+    confirm_guide(&app)?;
+    restore_main_window(&app)
+}
+
+#[tauri::command]
+fn cancel_guide_step(app: AppHandle) -> Result<(), String> {
+    dismiss_guide(&app)?;
+    restore_main_window(&app)
 }
 
 #[tauri::command]
@@ -408,7 +437,7 @@ fn register_global_shortcuts(app: &tauri::App) -> tauri::Result<()> {
 }
 
 fn any_waey_window_is_visible(app: &AppHandle) -> bool {
-    [MAIN_WINDOW_LABEL, REGION_WINDOW_LABEL]
+    [MAIN_WINDOW_LABEL, REGION_WINDOW_LABEL, GUIDE_WINDOW_LABEL]
         .iter()
         .any(|label| {
             app.get_webview_window(label)
@@ -498,6 +527,9 @@ pub fn run() {
             capture_current_screen,
             capture_selected_region,
             capture_current_ui_context,
+            show_guide_step,
+            complete_guide_step,
+            cancel_guide_step,
             cancel_region_selection,
             bootstrap_managed_provider,
             check_managed_provider_update,

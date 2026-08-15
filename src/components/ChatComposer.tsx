@@ -5,7 +5,7 @@ import type { DeveloperAccessLevel, StreamState } from "../shared/types";
 interface ChatComposerProps {
   streamState: StreamState;
   onCancelPrompt: () => Promise<void>;
-  onSubmitPrompt: (prompt: string) => Promise<void>;
+  onSubmitPrompt: (prompt: string, guideMode: boolean) => Promise<void>;
   isRtl: boolean;
   developerModeEnabled: boolean;
   developerAccessLevel: DeveloperAccessLevel;
@@ -52,6 +52,7 @@ export function ChatComposer({
   onChangeDeveloperWorkspaces,
 }: ChatComposerProps) {
   const [prompt, setPrompt] = useState("");
+  const [guideMode, setGuideMode] = useState(false);
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const isStreaming = streamState === "streaming";
@@ -61,15 +62,19 @@ export function ChatComposer({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isStreaming || !prompt.trim()) return;
-    await onSubmitPrompt(prompt);
+    await onSubmitPrompt(prompt, guideMode);
     setPrompt("");
+    setGuideMode(false);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (!isStreaming && prompt.trim()) {
-        void onSubmitPrompt(prompt).then(() => setPrompt(""));
+        void onSubmitPrompt(prompt, guideMode).then(() => {
+          setPrompt("");
+          setGuideMode(false);
+        });
       }
     }
   }
@@ -101,6 +106,22 @@ export function ChatComposer({
 
   return (
     <form className="chat-composer" onSubmit={handleSubmit}>
+      <button
+        aria-pressed={guideMode}
+        className={`guide-mode-trigger ${guideMode ? "guide-mode-trigger--active" : ""}`}
+        disabled={isStreaming}
+        onClick={() => setGuideMode((enabled) => !enabled)}
+        title={guideMode
+          ? (isRtl ? "الإرشاد خطوة بخطوة مفعّل للطلب القادم" : "Guide the next request step by step")
+          : (isRtl ? "فعّل الإرشاد خطوة بخطوة" : "Enable step-by-step guide")}
+        type="button"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M15 9l-2.2 4.2L9 15l2.2-4.2L15 9z" />
+        </svg>
+        <span>{isRtl ? "إرشاد" : "Guide"}</span>
+      </button>
       {developerModeEnabled && (
         <div className="dev-access-menu-wrap">
           <button

@@ -180,6 +180,34 @@ export interface CaptureRect {
   height: number;
 }
 
+export interface GuideTarget {
+  label?: string | null;
+  automationId?: string | null;
+  bounds?: CaptureRect | null;
+}
+
+export interface GuideStep {
+  kind: "step";
+  caption: string;
+  target?: GuideTarget | null;
+  stepIndex: number;
+  estimatedStepsLeft: number;
+}
+
+export interface GuideCompletion {
+  kind: "complete";
+  summary: string;
+}
+
+export type GuideResponse = GuideStep | GuideCompletion;
+
+export type GuideTheme = "light" | "dark";
+
+export interface GuideOverlayRequest extends GuideStep {
+  theme: GuideTheme;
+  isRtl: boolean;
+}
+
 export type ChatMessageRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {

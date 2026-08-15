@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { capturePreviewUrl } from "../features/capture";
+import { stripGuideBlocks } from "../features/guide";
 import type { ChatMessage, DeveloperAccessLevel, DeveloperContextStatus, DeveloperEditStatus, ScreenCapture, StreamState } from "../shared/types";
 
 interface ResponsePanelProps {
@@ -292,7 +293,7 @@ interface FormattedAssistantMessageProps {
 function FormattedAssistantMessage({ content, isRtl, onApplyDeveloperEdit, onApplySpreadsheetEdit, reasoningContent }: FormattedAssistantMessageProps) {
   const { answer, thinking } = parseAssistantThinking(content);
   const visibleThinking = reasoningContent?.trim() || thinking;
-  const segments = parseMessageSegments(answer);
+  const segments = parseMessageSegments(stripGuideBlocks(answer));
 
   return (
     <>

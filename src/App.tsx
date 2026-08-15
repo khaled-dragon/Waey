@@ -1,12 +1,13 @@
-import { useEffect, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useState, type PointerEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { OctopusMascot } from "./components/OctopusMascot";
+import { GuideOverlay } from "./components/GuideOverlay";
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import type { DeveloperContextStatus, DeveloperEditStatus, PersonaDraft, ProviderDraft } from "./shared/types";
+import type { DeveloperContextStatus, DeveloperEditStatus, GuideStep, PersonaDraft, ProviderDraft } from "./shared/types";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen, captureCurrentUiContext } from "./features/capture";
 import { applyDeveloperSpreadsheetEdit, buildDeveloperContext, writeDeveloperFile } from "./features/dev";
@@ -16,10 +17,12 @@ import { usePersonas } from "./features/personas";
 import { useProviders } from "./features/providers";
 import { useAppSettings } from "./features/settings";
 import { useAppUpdates } from "./features/updates";
+import { useGuideSession } from "./features/guide";
 
 function App() {
   const activeWindow = new URLSearchParams(window.location.search).get("window");
   if (activeWindow === "region-selector") return <RegionSelector />;
+  if (activeWindow === "guide-overlay") return <GuideOverlay />;
   return <MainOverlay />;
 }
 
@@ -137,7 +140,7 @@ function MainOverlay() {
     await captureCurrentScreen().catch(() => undefined);
   }
 
-  async function freshPromptUiContexts() {
+  const freshPromptUiContexts = useCallback(async () => {
     if (settings.attachUiContext) {
       const freshContext = await captureCurrentUiContext(settings.developerModeEnabled).catch((error) => {
         setCaptureError(error instanceof Error ? error.message : String(error));
@@ -154,7 +157,37 @@ function MainOverlay() {
       .sort((left, right) => right.capturedAt - left.capturedAt)[0];
 
     return latestContext ? [latestContext] : [];
-  }
+  }, [latestUiContexts, setCaptureError, settings.attachUiContext, settings.developerModeEnabled]);
+
+  const continueGuide = useCallback(async (step: GuideStep) => {
+    if (!selectedProvider) {
+      throw new Error("Select an API provider to continue the guide.");
+    }
+
+    clearCaptures();
+    const freshCapture = await captureCurrentScreen();
+    const uiContexts = freshCapture.uiContext ? [freshCapture.uiContext] : await freshPromptUiContexts();
+    const continuationPrompt = `The user confirmed guide step ${step.stepIndex}. Inspect the fresh screen context and provide exactly one next guide step, or complete the guide if the task is finished.`;
+
+    await submitPrompt(
+      continuationPrompt,
+      selectedProvider,
+      [freshCapture],
+      selectedPersona,
+      continuationPrompt,
+      uiContexts,
+      true,
+    );
+  }, [clearCaptures, freshPromptUiContexts, selectedPersona, selectedProvider, submitPrompt]);
+
+  const { beginGuide, cancelGuide } = useGuideSession({
+    isDark,
+    isRtl,
+    messages,
+    onContinueGuide: continueGuide,
+    onError: setCaptureError,
+    streamState,
+  });
 
   async function promptWithDeveloperContext(prompt: string) {
     let requestPrompt = prompt;
@@ -184,16 +217,19 @@ function MainOverlay() {
     return { requestPrompt, uiContexts };
   }
 
-  async function submitPromptWithDeveloperContext(prompt: string) {
+  async function submitPromptWithDeveloperContext(prompt: string, guideMode = false) {
     if (!selectedProvider) {
       setActivePanel("settings");
       return;
     }
 
     setActivePanel("chat");
+    if (guideMode) {
+      beginGuide();
+    }
     const { requestPrompt, uiContexts } = await promptWithDeveloperContext(prompt);
 
-    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, requestPrompt, uiContexts);
+    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, requestPrompt, uiContexts, guideMode);
   }
 
   async function editLastUserMessageWithDeveloperContext(messageId: string, prompt: string) {
@@ -394,7 +430,10 @@ function MainOverlay() {
                 developerAccessLevel={settings.developerAccessLevel}
               />
               <ChatComposer
-                onCancelPrompt={cancelPrompt}
+                onCancelPrompt={async () => {
+                  await cancelPrompt();
+                  await cancelGuide();
+                }}
                 onSubmitPrompt={submitPromptWithDeveloperContext}
                 streamState={streamState}
                 isRtl={isRtl}
