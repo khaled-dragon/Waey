@@ -795,8 +795,10 @@ body {
 
 .guide-action--confirm {
   border: 1px solid #c1272d;
-  background: var(--waey-gradient);
-  color: #ffffff;
+  background: linear-gradient(90deg, #6d0b22 0%, #c22b31 34%, #ef3f42 66%, #ec8376 100%);
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+  text-shadow: 0 1px 1px rgba(55, 16, 25, 0.36);
 }
 
 .guide-action:hover { filter: brightness(0.96); }

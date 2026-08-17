@@ -107,6 +107,9 @@ export function useGuideSession({
 
     if (guideResponse.kind === "complete") {
       setGuideState(idleGuideState);
+      void cancelGuideStep().catch((error) => {
+        onError(error instanceof Error ? error.message : String(error));
+      });
       return;
     }
 

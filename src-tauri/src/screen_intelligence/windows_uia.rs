@@ -8,7 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const COLLECTION_TIMEOUT: Duration = Duration::from_millis(1_500);
+const COLLECTION_TIMEOUT: Duration = Duration::from_millis(4_000);
 const COLLECTOR_VERSION: &str = "v3";
 
 pub fn capture_windows_ui_context(
