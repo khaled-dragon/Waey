@@ -1,12 +1,12 @@
 ![App Screenshot](assets/Waey.png)
 
-Waey is a screen-aware desktop AI assistant built for people who do not want to stop their flow just to explain what is already visible on their screen.
+Waey is a screen-aware desktop AI assistant for people who do not want to pause their flow just to explain what is already visible on their screen.
 
-Open it with a global shortcut, let it capture the current screen, ask your question, and keep working from the same overlay. Waey is designed for quick visual context, coding help, research, debugging, reading, and everyday desktop tasks where switching between apps slows the whole conversation down.
+Open it with a global shortcut, ask a question, and keep working from the same overlay. Waey can combine optional screenshots with fresh, readable screen context so a model can reason about the active app, visible controls, selected text, and the element under the cursor without asking the user to reconstruct the screen in prose.
 
 ## What Waey Does
 
-Waey sits quietly on your desktop and opens as an always-on-top overlay when you need it. It can attach screenshots, read safe UI structure from the active screen on Windows, stream model responses, keep local chat history, remember personas, and work with OpenAI-compatible providers.
+Waey sits quietly on your desktop and opens as an always-on-top overlay when you need it. It streams model responses, keeps local chat history, remembers personas, works with OpenAI-compatible providers, and keeps screen context separate from image attachments so text-only models can still use the visible desktop structure.
 
 The goal is simple: make AI feel closer to the work on your screen, not like a separate tab you have to keep feeding with context.
 
@@ -16,10 +16,13 @@ The goal is simple: make AI feel closer to the work on your screen, not like a s
 - Region selection shortcut with `Ctrl+Space` by default
 - Full-screen capture when the overlay opens
 - Up to 3 screenshots attached to the same message
-- Readable screen structure on Windows, including visible buttons, fields, labels, window title, and element bounds
+- Fresh readable screen context on Windows for each prompt, including visible windows, active app, controls, bounds, focused or pointed elements, and selected text when available
+- Screenshot and readable screen context routed independently, so removing an image does not remove text context
+- Interactive Guide Mode that presents one verified step at a time, highlights a target when it is available, recaptures context after confirmation, and stays out of the user's way between steps
 - OpenAI-compatible provider support
 - OpenRouter, Ollama, Groq, and custom base URL support
 - Managed default Waey provider bootstrap for first-time users
+- Signed in-app updates with manual checks from Settings
 - Streaming responses
 - Local conversation history
 - Rename, pin, search, and delete saved chats
@@ -27,8 +30,9 @@ The goal is simple: make AI feel closer to the work on your screen, not like a s
 - Cancel an active model response
 - Personas for reusable system prompts
 - Code block rendering with one-click copy
-- Optional Developer Mode for fast local code context from allowed workspaces
-- Developer access levels for quick read assistance or approved file edits
+- Optional Developer Mode for focused local code and spreadsheet context from allowed workspaces
+- Developer access levels for approved reads, edits, and new workspace files
+- Structured spreadsheet summaries and bounded spreadsheet edits
 - Worked timer for longer model responses
 - Light, dark, and system themes
 - English and Arabic UI direction support
@@ -42,21 +46,29 @@ Waey is not a chatbot window with a screenshot button added later. The product i
 
 The overlay is compact, draggable, resizable, and meant to stay out of the way while still being ready for real work. A user can open Waey, ask about the screen, attach more context, cancel a bad request, edit the last prompt, or return to a pinned chat without leaving the desktop workflow.
 
-Waey combines visual capture with structured desktop context. The screenshot helps the model understand layout, graphics, code, charts, images, and visual state. The readable UI structure gives it extra precision around what controls are visible, where they are, and what labels or fields exist on the screen. This hybrid approach makes simple questions faster to answer and makes UI-heavy screens easier for the model to reason about.
+Waey combines visual capture with structured desktop context. A screenshot helps a model understand layout, graphics, code, charts, images, and visual state. The readable UI structure gives it precision around visible controls, their bounds, the active application, selected text, and the element under the pointer. This hybrid approach makes UI-heavy screens easier to reason about, while still supporting text-only providers.
+
+## Guide Mode
+
+Guide Mode turns a multi-step desktop task into a focused, one-step interaction. After a user enables **Guide** in the composer, Waey asks the selected model for a structured guide response rather than a long set of instructions.
+
+For each step, Waey shows a movable guide card with the Waey mascot, the current instruction, and a target highlight when the active screen has a reliable matching UI element. The user can confirm the step, adjust the request, or cancel. Confirmation captures fresh screen context before requesting the next step, so the guide can react to what actually changed instead of assuming a fixed path.
+
+Guide Mode never clicks, types, or changes desktop settings on the user's behalf. It guides the user through the current screen and keeps the primary overlay hidden while a guide step is active.
 
 ## Developer Mode
 
 Developer Mode is optional and off by default. It is built for quick coding help when a screenshot is not enough, such as asking about an error in the current editor, checking a component, or getting a focused fix for a file that is already open.
 
-When enabled, the user chooses allowed workspace folders from Settings. Waey can then attach bounded code context from those folders to the next prompt, while ignoring heavy folders such as `node_modules`, `.git`, `target`, `dist`, and `build`. It also avoids secret-like files such as `.env`, `.pem`, and `.key`.
+When enabled, the user chooses allowed workspace folders from the composer. Waey can then attach focused code, selected-text, file, or spreadsheet context from those folders to the next prompt, while ignoring heavy folders such as `node_modules`, `.git`, `target`, `dist`, and `build`. It also avoids secret-like files such as `.env`, `.pem`, and `.key`.
 
 Access levels are available from the chat bar:
 
-- `Ask`: asks before reading workspace files.
-- `Assist`: reads from allowed workspaces and asks before edits.
-- `Auto`: can apply approved Waey edit blocks inside allowed workspaces.
+- `Ask for approval`: asks before reading workspace files or applying edits.
+- `Approve for me`: reads allowed workspaces and asks before file edits.
+- `Full access`: can apply validated Waey edit blocks inside allowed workspaces.
 
-For edits, Waey only writes to existing files inside allowed workspaces and blocks secret-like files. The feature is intended for fast, focused help, not for replacing a full coding agent.
+For edits, Waey resolves every target beneath an allowed workspace, blocks secret-like files and path escapes, verifies an existing file has not changed since it was read, and applies only validated structured file or spreadsheet actions. It can create new files only inside an allowed workspace. The feature is intended for fast, focused help, not for replacing a full coding agent.
 
 ## Tech Stack
 
@@ -79,6 +91,8 @@ You do not need Node.js, Rust, or a local development setup to use Waey.
 Download the latest installer from the GitHub Releases page, install it, and open Waey. The desktop app is already bundled and ready to run.
 
 First-time users can start with the managed Waey provider preset. Users who prefer their own models can add an OpenRouter, Ollama, Groq, or custom OpenAI-compatible provider from Settings.
+
+Waey checks for signed application updates when it starts. Users can also check from Settings and choose when to install an available update.
 
 ### Develop Locally
 
@@ -155,7 +169,7 @@ Waey stores user data locally in SQLite:
 - Personas
 - Settings
 
-API keys added by the user are stored locally so Waey can work as a normal desktop app. The managed Waey provider is hidden from the settings list to keep first-run usage simple.
+API keys added by the user are stored locally so Waey can work as a normal desktop app. The managed Waey provider is available immediately for first-run use while its key remains hidden from Settings.
 
 ## Current Architecture
 
@@ -172,7 +186,7 @@ The app is split around clear responsibilities:
 - `src/components` contains UI surfaces.
 - `src/features` contains frontend feature workflows.
 - `src/shared` contains shared TypeScript types and defaults.
-- `src-tauri/src` contains Rust commands, persistence, capture, readable UI context, developer workspace context, providers, settings, shortcuts, and LLM streaming.
+- `src-tauri/src` contains Rust commands, persistence, capture, Windows UI Automation context, guide-window coordination, developer workspace actions, spreadsheets, providers, settings, shortcuts, and LLM streaming.
 - `.github/workflows` builds and releases the app through GitHub Actions.
 
 ## Keyboard Shortcuts
@@ -185,9 +199,9 @@ Esc         Close the active overlay flow
 
 ## Privacy Notes
 
-Waey only sends the prompt, selected conversation context, attached screenshots, and optional readable screen structure to the provider selected by the user. Local history and settings stay on the device.
+Waey only sends the prompt, selected conversation context, optional screenshots, and optional readable screen structure to the provider selected by the user. Local history and settings stay on the device.
 
-Readable screen structure is designed to be conservative. It is optional, it is used as extra context for screenshots, and it filters sensitive password fields before anything reaches the selected model provider. On non-Windows systems, Waey falls back to screenshot-based context without breaking the app.
+Readable screen structure is designed to be conservative. It is optional, refreshed for each enabled prompt, and filters sensitive password fields before anything reaches the selected model provider. Screenshots remain separately optional. On non-Windows systems, Waey falls back to screenshot-based context without breaking the app.
 
 Developer Mode can send selected local code context from user-approved workspace folders to the chosen model provider. If the user allows a model to read or edit local files, the user is responsible for reviewing the output, choosing a trusted provider, and understanding any impact of those actions. Use it carefully and only with folders you are comfortable exposing to the selected model.
 
@@ -208,4 +222,4 @@ The frontend build runs before the Tauri bundle step through `tauri.conf.json`.
 
 ## Project Status
 
-Waey is in active development. The current release line focuses on stability, polished settings behavior, local-first history, provider flexibility, and a fast screen-aware overlay experience.
+Waey is in active development. The current release line focuses on reliable Windows UI Automation, interactive screen guidance, controlled local developer workflows, provider flexibility, and a fast screen-aware overlay experience.
