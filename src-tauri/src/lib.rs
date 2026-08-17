@@ -353,7 +353,7 @@ fn remember_screen_context_target(app: &AppHandle) {
             ));
         }
         Err(_) => logger::warn("screen context target lock was poisoned"),
-    }
+    };
 }
 
 fn screen_context_target_handle(app: &AppHandle) -> Option<isize> {
