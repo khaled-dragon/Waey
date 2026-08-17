@@ -38,6 +38,7 @@ function MainOverlay() {
   const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
   const [showClosePrompt, setShowClosePrompt] = useState(false);
   const [guideComposerFocusKey, setGuideComposerFocusKey] = useState(0);
+  const [guideUiContext, setGuideUiContext] = useState<UiContextSnapshot | null>(null);
   const [developerContextStatus, setDeveloperContextStatus] = useState<DeveloperContextStatus | null>(null);
   const [developerEditStatus, setDeveloperEditStatus] = useState<DeveloperEditStatus | null>(null);
 
@@ -174,15 +175,15 @@ function MainOverlay() {
     }
 
     clearCaptures();
-    const freshCapture = await captureCurrentScreen();
-    const uiContexts = freshCapture.uiContext ? [freshCapture.uiContext] : await freshPromptUiContexts();
+    const uiContexts = await freshPromptUiContexts();
+    setGuideUiContext(uiContexts[0] ?? null);
     onContextCaptured();
     const continuationPrompt = `The user confirmed guide step ${step.stepIndex}. Inspect the fresh screen context and provide exactly one next guide step, or complete the guide if the task is finished.`;
 
     await submitPrompt(
       continuationPrompt,
       selectedProvider,
-      [freshCapture],
+      [],
       selectedPersona,
       continuationPrompt,
       uiContexts,
@@ -201,6 +202,7 @@ function MainOverlay() {
     isDark,
     isRtl,
     messages,
+    uiContext: guideUiContext,
     onContinueGuide: continueGuide,
     onGuideAdjustmentRequested: handleGuideAdjustmentRequested,
     onError: setCaptureError,
@@ -252,6 +254,9 @@ function MainOverlay() {
       beginGuide();
     }
     const { developerContext, uiContexts } = await promptWithDeveloperContext(prompt);
+    if (guideMode || adjustmentStep) {
+      setGuideUiContext(uiContexts[0] ?? null);
+    }
 
     if (adjustmentStep) {
       try {

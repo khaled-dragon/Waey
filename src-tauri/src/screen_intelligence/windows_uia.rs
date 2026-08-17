@@ -9,7 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const COLLECTION_TIMEOUT: Duration = Duration::from_millis(1_500);
-const COLLECTOR_VERSION: &str = "v2";
+const COLLECTOR_VERSION: &str = "v3";
 
 pub fn capture_windows_ui_context(
     region: Option<UiContextRect>,
@@ -154,17 +154,33 @@ fn timestamp_millis() -> u128 {
 }
 
 const UIA_COLLECTOR_SCRIPT: &str = r#"
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName System.Windows.Forms
-
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class WaeyNativeWindow {
-  [DllImport("user32.dll")]
+  [DllImport("user32.dll", SetLastError = true)]
   public static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetProcessDPIAware();
+
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+  [DllImport("shcore.dll")]
+  public static extern int SetProcessDpiAwareness(int value);
+
+  public static void EnablePerMonitorDpiAwareness() {
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) { return; } } catch {}
+    try { if (SetProcessDpiAwareness(2) == 0) { return; } } catch {}
+    try { SetProcessDPIAware(); } catch {}
+  }
 }
 "@
+
+[WaeyNativeWindow]::EnablePerMonitorDpiAwareness()
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName System.Windows.Forms
 
 $MaxDepth = 15
 $MaxElements = 2000

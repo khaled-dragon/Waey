@@ -1,8 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage, GuideOffer, GuideOverlayRequest, GuideStep } from "../../shared/types";
+import type { ChatMessage, GuideOffer, GuideOverlayRequest, GuideStep, UiContextSnapshot } from "../../shared/types";
 import { cancelGuideStep, showGuideStep } from "./guideCommands";
 import { extractGuideResponse } from "./guideProtocol";
+import { reconcileGuideStepTarget } from "./guideTargeting";
 
 type GuidePhase = "idle" | "awaiting" | "offer" | "active" | "adjusting";
 
@@ -18,6 +19,7 @@ interface UseGuideSessionOptions {
   isDark: boolean;
   isRtl: boolean;
   messages: ChatMessage[];
+  uiContext: UiContextSnapshot | null;
   onContinueGuide: (step: GuideStep, onContextCaptured: () => void) => Promise<void>;
   onGuideAdjustmentRequested: (step: GuideStep) => void;
   onError: (message: string) => void;
@@ -36,6 +38,7 @@ export function useGuideSession({
   isDark,
   isRtl,
   messages,
+  uiContext,
   onContinueGuide,
   onGuideAdjustmentRequested,
   onError,
@@ -45,18 +48,20 @@ export function useGuideSession({
   const guideStateRef = useRef(guideState);
   const assistantMessageIdsRef = useRef<string[]>([]);
   const activateStep = useCallback((step: GuideStep, startedAt: number) => {
+    const reconciledStep = reconcileGuideStepTarget(step, uiContext);
+
     setGuideState({
       phase: "active",
-      step,
+      step: reconciledStep,
       offer: null,
       startedAt,
       knownAssistantMessageIds: assistantMessageIdsRef.current,
     });
-    void showGuideStep(toStepOverlayRequest(step, isDark, isRtl)).catch((error) => {
+    void showGuideStep(toStepOverlayRequest(reconciledStep, isDark, isRtl)).catch((error) => {
       setGuideState(idleGuideState);
       onError(error instanceof Error ? error.message : String(error));
     });
-  }, [isDark, isRtl, onError]);
+  }, [isDark, isRtl, onError, uiContext]);
 
   useEffect(() => {
     guideStateRef.current = guideState;
@@ -141,6 +146,16 @@ export function useGuideSession({
         const activeStep = guideStateRef.current.step;
 
         if (!activeStep || guideStateRef.current.phase !== "active") {
+          return;
+        }
+
+        if (activeStep.estimatedStepsLeft === 0) {
+          setGuideState(idleGuideState);
+          void cancelGuideStep().catch((error) => {
+            if (isMounted) {
+              onError(error instanceof Error ? error.message : String(error));
+            }
+          });
           return;
         }
 

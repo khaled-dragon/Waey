@@ -86,7 +86,9 @@ export function useLlmChat({
         content: "",
         createdAt,
       };
-      const historyMessages = messages.filter((message) => message.content.trim()).slice(-12);
+      const historyMessages = messages
+        .filter((message) => message.content.trim())
+        .slice(guideMode ? -4 : -12);
 
       activeRequestId.current = requestId;
       assistantMessageByRequest.current.set(requestId, assistantMessage);

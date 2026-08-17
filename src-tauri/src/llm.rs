@@ -15,8 +15,11 @@ const STREAM_ERROR_EVENT: &str = "llm-stream-error";
 
 const MANAGED_GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 2_048;
 const CUSTOM_GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 4_096;
+const GUIDE_GROQ_QWEN_MAX_COMPLETION_TOKENS: u32 = 768;
 const MAX_SCREEN_CONTEXT_ELEMENTS: usize = 72;
 const MAX_SCREEN_CONTEXT_CHARACTERS: usize = 12_000;
+const MAX_GUIDE_SCREEN_CONTEXT_ELEMENTS: usize = 28;
+const MAX_GUIDE_SCREEN_CONTEXT_CHARACTERS: usize = 5_000;
 
 #[derive(Default)]
 pub struct LlmRequestRegistry {
@@ -254,9 +257,15 @@ fn chat_request_body(app: &AppHandle, request: &LlmChatRequest) -> Result<Value,
     });
 
     if uses_groq_qwen_reasoning(&request.provider) {
-        body["max_completion_tokens"] = json!(groq_qwen_max_completion_tokens(&request.provider));
+        body["max_completion_tokens"] = json!(groq_qwen_max_completion_tokens(
+            &request.provider,
+            request.guide_mode
+        ));
         body["reasoning_format"] = json!("parsed");
-        body["reasoning_effort"] = json!(groq_qwen_reasoning_effort(&request.provider));
+        body["reasoning_effort"] = json!(groq_qwen_reasoning_effort(
+            &request.provider,
+            request.guide_mode
+        ));
     }
 
     Ok(body)
@@ -418,7 +427,7 @@ fn prompt_with_ui_context(request: &LlmChatRequest) -> String {
         return request.prompt.clone();
     };
 
-    let Some(formatted_context) = format_ui_context(context) else {
+    let Some(formatted_context) = format_ui_context(context, request.guide_mode) else {
         return request.prompt.clone();
     };
 
@@ -428,7 +437,7 @@ fn prompt_with_ui_context(request: &LlmChatRequest) -> String {
     )
 }
 
-fn format_ui_context(context: &UiContextSnapshot) -> Option<String> {
+fn format_ui_context(context: &UiContextSnapshot, guide_mode: bool) -> Option<String> {
     if context.elements.is_empty()
         && context
             .active_window_title
@@ -517,11 +526,21 @@ fn format_ui_context(context: &UiContextSnapshot) -> Option<String> {
         }
     }
 
+    let maximum_elements = if guide_mode {
+        MAX_GUIDE_SCREEN_CONTEXT_ELEMENTS
+    } else {
+        MAX_SCREEN_CONTEXT_ELEMENTS
+    };
+    let maximum_characters = if guide_mode {
+        MAX_GUIDE_SCREEN_CONTEXT_CHARACTERS
+    } else {
+        MAX_SCREEN_CONTEXT_CHARACTERS
+    };
     let actionable_elements = context
         .elements
         .iter()
         .filter(|element| is_actionable_element(element))
-        .take(MAX_SCREEN_CONTEXT_ELEMENTS)
+        .take(maximum_elements)
         .collect::<Vec<_>>();
     let content_elements = context
         .elements
@@ -565,10 +584,7 @@ fn format_ui_context(context: &UiContextSnapshot) -> Option<String> {
         ));
     }
 
-    Some(truncate_text(
-        &lines.join("\n"),
-        MAX_SCREEN_CONTEXT_CHARACTERS,
-    ))
+    Some(truncate_text(&lines.join("\n"), maximum_characters))
 }
 
 fn is_actionable_element(element: &crate::ui_context::UiElementSummary) -> bool {
@@ -757,7 +773,11 @@ fn uses_groq_qwen_reasoning(provider: &LlmProvider) -> bool {
     provider.base_url.contains("api.groq.com") && provider.model.starts_with("qwen/")
 }
 
-fn groq_qwen_max_completion_tokens(provider: &LlmProvider) -> u32 {
+fn groq_qwen_max_completion_tokens(provider: &LlmProvider, guide_mode: bool) -> u32 {
+    if guide_mode {
+        return GUIDE_GROQ_QWEN_MAX_COMPLETION_TOKENS;
+    }
+
     if provider.managed {
         MANAGED_GROQ_QWEN_MAX_COMPLETION_TOKENS
     } else {
@@ -765,8 +785,8 @@ fn groq_qwen_max_completion_tokens(provider: &LlmProvider) -> u32 {
     }
 }
 
-fn groq_qwen_reasoning_effort(provider: &LlmProvider) -> &'static str {
-    if provider.managed {
+fn groq_qwen_reasoning_effort(provider: &LlmProvider, guide_mode: bool) -> &'static str {
+    if guide_mode || provider.managed {
         "none"
     } else {
         "default"

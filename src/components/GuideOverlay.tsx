@@ -1,11 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect, useState, type PointerEvent } from "react";
 import { completeGuideStep, cancelGuideStep, requestGuideAdjustment, startGuideOffer } from "../features/guide/guideCommands";
 import type { GuideOverlayRequest } from "../shared/types";
 import { OctopusMascot } from "./OctopusMascot";
 
 export function GuideOverlay() {
   const [guide, setGuide] = useState<GuideOverlayRequest | null>(null);
+  const guideWindow = getCurrentWindow();
 
   useEffect(() => {
     let isMounted = true;
@@ -42,9 +44,29 @@ export function GuideOverlay() {
     : (guide.isRtl ? "تم" : "I did it");
   const targetLabel = guide.target?.label?.trim();
 
+  function beginDragging(event: PointerEvent<HTMLElement>) {
+    const target = event.target instanceof Element ? event.target : null;
+
+    if (event.button !== 0 || target?.closest("button")) {
+      return;
+    }
+
+    void guideWindow.startDragging();
+  }
+
   return (
     <div className={`guide-overlay-stage guide-overlay-stage--${guide.theme}`} dir={guide.isRtl ? "rtl" : "ltr"}>
-      <section className={`guide-popover guide-popover--${direction}`} aria-live="polite">
+      <section
+        className={`guide-popover guide-popover--${direction}`}
+        aria-live="polite"
+        onPointerDownCapture={beginDragging}
+        title={guide.isRtl ? "اسحب لتحريك المرشد" : "Drag to move the guide"}
+      >
+        <div
+          aria-hidden="true"
+          className="guide-popover-drag-handle"
+          onPointerDown={beginDragging}
+        />
         <div className="guide-popover-mascot">
           <OctopusMascot size={48} state={direction === "thinking" ? "thinking" : "idle"} />
         </div>
