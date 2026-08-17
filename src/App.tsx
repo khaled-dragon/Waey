@@ -147,10 +147,17 @@ function MainOverlay() {
 
   const freshPromptUiContexts = useCallback(async (allowClipboardSelection = false) => {
     if (settings.attachUiContext) {
-      const freshContext = await captureCurrentUiContext(allowClipboardSelection).catch((error) => {
-        setCaptureError(error instanceof Error ? error.message : String(error));
-        return null;
-      });
+      let freshContext: UiContextSnapshot | null = null;
+
+      try {
+        freshContext = await captureCurrentUiContext(allowClipboardSelection);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        setCaptureError(isRtl
+          ? `تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. السبب: ${detail}`
+          : `Waey could not read the current screen structure for this message. Reason: ${detail}`);
+        return [];
+      }
 
       if (freshContext) {
         return [freshContext];

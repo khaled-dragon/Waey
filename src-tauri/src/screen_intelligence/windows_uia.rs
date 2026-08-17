@@ -9,55 +9,110 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const COLLECTION_TIMEOUT: Duration = Duration::from_millis(4_000);
-const COLLECTOR_VERSION: &str = "v3";
+const COLLECTOR_VERSION: &str = "v4";
+
+pub fn capture_foreground_window_handle() -> Option<isize> {
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn GetForegroundWindow() -> isize;
+        }
+
+        let handle = unsafe { GetForegroundWindow() };
+        return (handle != 0).then_some(handle);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
 
 pub fn capture_windows_ui_context(
     region: Option<UiContextRect>,
     allow_clipboard_selection: bool,
-) -> Option<ScreenContextSnapshot> {
+    target_window_handle: Option<isize>,
+) -> Result<Option<ScreenContextSnapshot>, String> {
     if !cfg!(target_os = "windows") {
-        return None;
+        return Ok(None);
     }
 
     let started_at = Instant::now();
-    let raw_snapshot = run_collector(allow_clipboard_selection)?;
+    let raw_snapshot = run_collector(allow_clipboard_selection, target_window_handle)?;
     let mut snapshot =
         serde_json::from_str::<ScreenContextSnapshot>(raw_snapshot.trim_start_matches('\u{feff}'))
-            .ok()?;
+            .map_err(|error| format!("UI Automation returned invalid screen data: {error}"))?;
+
+    if snapshot.elements.is_empty()
+        && snapshot
+            .active_window_title
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+    {
+        return Err("UI Automation returned no active window or readable controls.".to_string());
+    }
+
     snapshot.schema_version = SCREEN_CONTEXT_SCHEMA_VERSION;
     snapshot.captured_at = timestamp_millis();
     snapshot.region = region.clone();
 
-    Some(normalize_snapshot(
+    Ok(Some(normalize_snapshot(
         snapshot,
         region.as_ref(),
         started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-    ))
+    )))
 }
 
-fn run_collector(allow_clipboard_selection: bool) -> Option<String> {
+fn run_collector(
+    allow_clipboard_selection: bool,
+    target_window_handle: Option<isize>,
+) -> Result<String, String> {
     let run_id = format!("{}_{}", std::process::id(), timestamp_millis());
     let script_path = collector_script_path();
     let runner_path = temporary_file_path(&run_id, "vbs");
     let output_path = temporary_file_path(&run_id, "json");
 
-    fs::create_dir_all(script_path.parent()?).ok()?;
-    ensure_collector_script(&script_path).ok()?;
+    let directory = script_path
+        .parent()
+        .ok_or_else(|| "Unable to resolve the UI Automation working directory.".to_string())?;
+    fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    ensure_collector_script(&script_path)?;
     fs::write(
         &runner_path,
-        vbs_runner_content(&script_path, &output_path, allow_clipboard_selection),
+        vbs_runner_content(
+            &script_path,
+            &output_path,
+            allow_clipboard_selection,
+            target_window_handle,
+        ),
     )
-    .ok()?;
+    .map_err(|error| error.to_string())?;
 
-    let output = run_wscript_hidden(&runner_path, COLLECTION_TIMEOUT);
-    let json = output
-        .filter(|process_output| process_output.status.success())
-        .and_then(|_| fs::read_to_string(&output_path).ok());
+    let result = (|| {
+        let output = run_wscript_hidden(&runner_path, COLLECTION_TIMEOUT)?;
+        if !output.status.success() {
+            return Err(format!(
+                "UI Automation collector exited with status {}.",
+                output.status
+            ));
+        }
+
+        let json = fs::read_to_string(&output_path)
+            .map_err(|error| format!("UI Automation collector did not produce output: {error}"))?;
+        if json.trim().is_empty() {
+            return Err("UI Automation collector returned an empty screen snapshot.".to_string());
+        }
+
+        Ok(json)
+    })();
 
     let _ = fs::remove_file(runner_path);
     let _ = fs::remove_file(output_path);
 
-    json
+    result
 }
 
 fn collector_script_path() -> PathBuf {
@@ -88,23 +143,27 @@ fn ensure_collector_script(path: &PathBuf) -> Result<(), String> {
 }
 
 fn powershell_file_content(script: &str) -> String {
-    format!("param([string]$OutputFile, [bool]$AllowClipboardSelection = $false)\n{script}")
+    format!(
+        "param([string]$OutputFile, [bool]$AllowClipboardSelection = $false, [Int64]$TargetHwnd = 0)\n{script}"
+    )
 }
 
 fn vbs_runner_content(
     script_path: &PathBuf,
     output_path: &PathBuf,
     allow_clipboard_selection: bool,
+    target_window_handle: Option<isize>,
 ) -> String {
     let powershell_path = std::env::var("SystemRoot")
         .map(|root| format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"))
         .unwrap_or_else(|_| "powershell.exe".to_string());
     let command = format!(
-        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\" -AllowClipboardSelection ${}",
+        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\" -AllowClipboardSelection ${} -TargetHwnd {}",
         powershell_path,
         script_path.display(),
         output_path.display(),
-        if allow_clipboard_selection { "true" } else { "false" }
+        if allow_clipboard_selection { "true" } else { "false" },
+        target_window_handle.unwrap_or_default(),
     );
 
     format!(
@@ -113,10 +172,13 @@ fn vbs_runner_content(
     )
 }
 
-fn run_wscript_hidden(runner_path: &PathBuf, timeout: Duration) -> Option<Output> {
+fn run_wscript_hidden(runner_path: &PathBuf, timeout: Duration) -> Result<Output, String> {
+    let runner_path = runner_path
+        .to_str()
+        .ok_or_else(|| "UI Automation runner path is not valid UTF-8.".to_string())?;
     let mut command = Command::new("wscript.exe");
     command
-        .args(["//B", "//NoLogo", runner_path.to_str()?])
+        .args(["//B", "//NoLogo", runner_path])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -128,18 +190,25 @@ fn run_wscript_hidden(runner_path: &PathBuf, timeout: Duration) -> Option<Output
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = command.spawn().ok()?;
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
     let started_at = Instant::now();
 
     loop {
-        if child.try_wait().ok()?.is_some() {
-            return child.wait_with_output().ok();
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return child.wait_with_output().map_err(|error| error.to_string());
         }
 
         if started_at.elapsed() >= timeout {
             let _ = child.kill();
             let _ = child.wait();
-            return None;
+            return Err(format!(
+                "UI Automation timed out after {} ms.",
+                timeout.as_millis()
+            ));
         }
 
         thread::sleep(Duration::from_millis(15));
@@ -157,6 +226,7 @@ const UIA_COLLECTOR_SCRIPT: &str = r#"
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class WaeyNativeWindow {
   [DllImport("user32.dll", SetLastError = true)]
   public static extern IntPtr GetForegroundWindow();
@@ -170,16 +240,39 @@ public static class WaeyNativeWindow {
   [DllImport("shcore.dll")]
   public static extern int SetProcessDpiAwareness(int value);
 
+  [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode)]
+  public static extern IntPtr SendMessageTimeout(
+    IntPtr hWnd,
+    uint message,
+    IntPtr wParam,
+    IntPtr lParam,
+    uint flags,
+    uint timeout,
+    out IntPtr result
+  );
+
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+
   public static void EnablePerMonitorDpiAwareness() {
     try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) { return; } } catch {}
     try { if (SetProcessDpiAwareness(2) == 0) { return; } } catch {}
     try { SetProcessDPIAware(); } catch {}
+  }
+
+  public static bool IsChromiumWindow(IntPtr handle) {
+    try {
+      var buffer = new StringBuilder(256);
+      GetClassName(handle, buffer, buffer.Capacity);
+      return buffer.ToString().StartsWith("Chrome_WidgetWin", StringComparison.OrdinalIgnoreCase);
+    } catch { return false; }
   }
 }
 "@
 
 [WaeyNativeWindow]::EnablePerMonitorDpiAwareness()
 Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 
 $MaxDepth = 15
@@ -373,12 +466,67 @@ function Get-VisibleWindows {
   return $items.ToArray()
 }
 
+function Wake-ChromiumAccessibility([IntPtr]$windowHandle) {
+  if ($windowHandle -eq [IntPtr]::Zero) { return }
+  try {
+    $result = [IntPtr]::Zero
+    [WaeyNativeWindow]::SendMessageTimeout(
+      $windowHandle,
+      0x003D,
+      [IntPtr]::Zero,
+      [IntPtr](-25),
+      0x0002,
+      250,
+      [ref]$result
+    ) | Out-Null
+  } catch {}
+}
+
+function Get-ShallowElementCount($root) {
+  if ($null -eq $root) { return 0 }
+  $count = 0
+  try {
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $child = $walker.GetFirstChild($root)
+    while ($null -ne $child -and $count -lt 24) {
+      $count++
+      $grandchild = $walker.GetFirstChild($child)
+      while ($null -ne $grandchild -and $count -lt 24) {
+        $count++
+        $grandchild = $walker.GetNextSibling($grandchild)
+      }
+      $child = $walker.GetNextSibling($child)
+    }
+  } catch {}
+  return $count
+}
+
 $cursor = [System.Windows.Forms.Cursor]::Position
 $activeWindow = $null
+$targetHandle = [IntPtr]::Zero
 try {
-  $foregroundHandle = [WaeyNativeWindow]::GetForegroundWindow()
-  if ($foregroundHandle -ne [IntPtr]::Zero) { $activeWindow = [System.Windows.Automation.AutomationElement]::FromHandle($foregroundHandle) }
+  # The target is captured before Waey hides. A spawned PowerShell process can
+  # briefly become foreground, so GetForegroundWindow here is only a fallback.
+  if ($TargetHwnd -ne 0) { $targetHandle = [IntPtr]$TargetHwnd }
+  if ($targetHandle -eq [IntPtr]::Zero) { $targetHandle = [WaeyNativeWindow]::GetForegroundWindow() }
+  if ($targetHandle -ne [IntPtr]::Zero) { $activeWindow = [System.Windows.Automation.AutomationElement]::FromHandle($targetHandle) }
 } catch {}
+
+if ($targetHandle -ne [IntPtr]::Zero -and [WaeyNativeWindow]::IsChromiumWindow($targetHandle)) {
+  $focusHandler = $null
+  try {
+    $focusHandler = [System.Windows.Automation.AutomationFocusChangedEventHandler]{ param($sender, $eventArgs) }
+    [System.Windows.Automation.Automation]::AddAutomationFocusChangedEventHandler($focusHandler)
+  } catch {}
+
+  Wake-ChromiumAccessibility $targetHandle
+  for ($attempt = 0; $attempt -lt 6; $attempt++) {
+    if ((Get-ShallowElementCount $activeWindow) -gt 10) { break }
+    Start-Sleep -Milliseconds 100
+    try { $activeWindow = [System.Windows.Automation.AutomationElement]::FromHandle($targetHandle) } catch {}
+  }
+}
+
 if ($null -eq $activeWindow) {
   try { $activeWindow = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
 }

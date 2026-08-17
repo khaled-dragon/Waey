@@ -36,6 +36,7 @@ use providers::{
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
 use spreadsheet::apply_developer_spreadsheet_edit;
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use ui_context::{capture_ui_context, UiContextSnapshot};
 
@@ -55,6 +56,11 @@ struct CaptureError {
     created_at: u128,
 }
 
+#[derive(Default)]
+struct ScreenContextTarget {
+    window_handle: Mutex<Option<isize>>,
+}
+
 #[tauri::command]
 fn show_overlay_window(app: AppHandle) -> Result<(), String> {
     show_overlay(&app)
@@ -72,9 +78,10 @@ fn show_region_selector_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
+    let target_window_handle = screen_context_target_handle(&app);
     hide_window_safely(&app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_full_screen(attach_ui_context(&app));
+    let capture_result = capture_full_screen(attach_ui_context(&app), target_window_handle);
 
     restore_main_window(&app)?;
 
@@ -92,9 +99,10 @@ fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
 
 #[tauri::command]
 fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCapture, String> {
+    let target_window_handle = screen_context_target_handle(&app);
     hide_window_safely(&app, REGION_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_screen_region(rect, attach_ui_context(&app));
+    let capture_result = capture_screen_region(rect, attach_ui_context(&app), target_window_handle);
 
     restore_main_window(&app)?;
 
@@ -119,12 +127,20 @@ fn capture_current_ui_context(
         return Ok(None);
     }
 
+    let target_window_handle = screen_context_target_handle(&app);
     hide_window_safely(&app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(80));
-    let context = capture_ui_context(None, allow_clipboard_selection);
-    restore_main_window(&app)?;
+    let context_result = capture_ui_context(None, allow_clipboard_selection, target_window_handle);
+    if let Err(error) = &context_result {
+        logger::warn(format!(
+            "screen context capture failed for target {:?}: {error}",
+            target_window_handle
+        ));
+    }
+    let restore_result = restore_main_window(&app);
 
-    Ok(context)
+    restore_result?;
+    context_result
 }
 
 #[tauri::command]
@@ -291,6 +307,7 @@ fn window_by_label(app: &AppHandle, label: &str) -> Result<WebviewWindow, String
 }
 
 fn show_overlay(app: &AppHandle) -> Result<(), String> {
+    remember_screen_context_target(app);
     app.emit(OVERLAY_OPENED_EVENT, ())
         .map_err(|error| error.to_string())?;
 
@@ -301,7 +318,8 @@ fn show_overlay(app: &AppHandle) -> Result<(), String> {
 
     hide_window_safely(app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_full_screen(attach_ui_context(app));
+    let capture_result =
+        capture_full_screen(attach_ui_context(app), screen_context_target_handle(app));
 
     restore_main_window(app)?;
 
@@ -315,8 +333,41 @@ fn show_overlay(app: &AppHandle) -> Result<(), String> {
 }
 
 fn show_region_selector(app: &AppHandle) -> Result<(), String> {
+    remember_screen_context_target(app);
     hide_window_safely(app, MAIN_WINDOW_LABEL);
     show_window(app, REGION_WINDOW_LABEL)
+}
+
+fn remember_screen_context_target(app: &AppHandle) {
+    let Some(window_handle) = screen_intelligence::capture_foreground_window_handle() else {
+        logger::warn("could not capture the foreground window for screen context");
+        return;
+    };
+
+    let state = app.state::<ScreenContextTarget>();
+    match state.window_handle.lock() {
+        Ok(mut stored_handle) => {
+            *stored_handle = Some(window_handle);
+            logger::info(format!(
+                "stored screen context target window: {window_handle}"
+            ));
+        }
+        Err(_) => logger::warn("screen context target lock was poisoned"),
+    }
+}
+
+fn screen_context_target_handle(app: &AppHandle) -> Option<isize> {
+    let window_handle = app
+        .state::<ScreenContextTarget>()
+        .window_handle
+        .lock()
+        .map(|stored_handle| *stored_handle)
+        .unwrap_or_else(|_| {
+            logger::warn("screen context target lock was poisoned");
+            None
+        });
+
+    window_handle
 }
 
 fn show_window(app: &AppHandle, label: &str) -> Result<(), String> {
@@ -511,6 +562,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .manage(LlmRequestRegistry::default())
+        .manage(ScreenContextTarget::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())

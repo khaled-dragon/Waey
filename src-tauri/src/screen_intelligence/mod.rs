@@ -6,7 +6,7 @@ pub use model::{
     ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
     UiElementSummary, VisibleWindowSummary,
 };
-pub use windows_uia::capture_windows_ui_context;
+pub use windows_uia::{capture_foreground_window_handle, capture_windows_ui_context};
 
 use serde::{Deserialize, Serialize};
 
