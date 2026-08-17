@@ -1,10 +1,43 @@
-import type { CaptureRect, GuideCompletion, GuideResponse, GuideStep, GuideTarget } from "../../shared/types";
+import type { CaptureRect, GuideCompletion, GuideOffer, GuideResponse, GuideStep, GuideTarget } from "../../shared/types";
 
-const GUIDE_BLOCK_PATTERN = /```waey-guide\s*\r?\n([\s\S]*?)```/gi;
+const GUIDE_MARKER_PATTERN = /<!--\s*WAEY_GUIDE\s*:\s*([\s\S]*?)-->/gi;
+const LEGACY_GUIDE_BLOCK_PATTERN = /```waey-guide\s*\r?\n([\s\S]*?)```/gi;
 const MAX_CAPTION_LENGTH = 600;
+const MAX_SUMMARY_LENGTH = 240;
 
 export function extractGuideResponse(content: string): GuideResponse | null {
-  const blocks = [...content.matchAll(GUIDE_BLOCK_PATTERN)];
+  const markerResponse = extractGuideMarker(content, GUIDE_MARKER_PATTERN);
+
+  if (markerResponse) {
+    return markerResponse;
+  }
+
+  const legacyResponse = extractGuideMarker(content, LEGACY_GUIDE_BLOCK_PATTERN);
+
+  if (legacyResponse) {
+    return legacyResponse;
+  }
+
+  return extractLooseGuideBlock(content)?.response ?? null;
+}
+
+export function stripGuideBlocks(content: string) {
+  const withoutMarkers = content
+    .replace(GUIDE_MARKER_PATTERN, "")
+    .replace(LEGACY_GUIDE_BLOCK_PATTERN, "");
+  const looseGuide = extractLooseGuideBlock(withoutMarkers);
+
+  if (!looseGuide) {
+    return normalizeWhitespace(withoutMarkers);
+  }
+
+  return normalizeWhitespace(
+    `${withoutMarkers.slice(0, looseGuide.start)}${withoutMarkers.slice(looseGuide.end)}`,
+  );
+}
+
+function extractGuideMarker(content: string, pattern: RegExp): GuideResponse | null {
+  const blocks = [...content.matchAll(pattern)];
 
   for (const block of blocks.reverse()) {
     const parsed = parseGuideBlock(block[1] ?? "");
@@ -17,8 +50,16 @@ export function extractGuideResponse(content: string): GuideResponse | null {
   return null;
 }
 
-export function stripGuideBlocks(content: string) {
-  return content.replace(GUIDE_BLOCK_PATTERN, "").replace(/\n{3,}/g, "\n\n").trim();
+function extractLooseGuideBlock(content: string) {
+  for (const candidate of jsonObjectCandidates(content).reverse()) {
+    const parsed = parseGuideBlock(candidate.value);
+
+    if (parsed) {
+      return { ...candidate, response: parsed };
+    }
+  }
+
+  return null;
 }
 
 function parseGuideBlock(value: string): GuideResponse | null {
@@ -27,6 +68,10 @@ function parseGuideBlock(value: string): GuideResponse | null {
 
     if (!isRecord(candidate) || typeof candidate.kind !== "string") {
       return null;
+    }
+
+    if (candidate.kind === "offer") {
+      return parseOffer(candidate);
     }
 
     if (candidate.kind === "complete") {
@@ -41,6 +86,18 @@ function parseGuideBlock(value: string): GuideResponse | null {
   }
 
   return null;
+}
+
+function parseOffer(candidate: Record<string, unknown>): GuideOffer | null {
+  const summary = normalizedText(candidate.summary, MAX_SUMMARY_LENGTH);
+  const estimatedSteps = positiveInteger(candidate.estimatedSteps);
+  const firstStep = isRecord(candidate.firstStep) ? parseStep(candidate.firstStep) : null;
+
+  if (!summary || estimatedSteps === null || !firstStep) {
+    return null;
+  }
+
+  return { kind: "offer", summary, estimatedSteps, firstStep };
 }
 
 function parseCompletion(candidate: Record<string, unknown>): GuideCompletion | null {
@@ -130,4 +187,54 @@ function nonNegativeInteger(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function jsonObjectCandidates(content: string) {
+  const candidates: Array<{ value: string; start: number; end: number }> = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+
+    if (start === -1) {
+      if (character === "{") {
+        start = index;
+        depth = 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        candidates.push({ value: content.slice(start, index + 1), start, end: index + 1 });
+        start = -1;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+function normalizeWhitespace(content: string) {
+  return content.replace(/\n{3,}/g, "\n\n").trim();
 }

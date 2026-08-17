@@ -194,16 +194,28 @@ export interface GuideStep {
   estimatedStepsLeft: number;
 }
 
+export interface GuideOffer {
+  kind: "offer";
+  summary: string;
+  estimatedSteps: number;
+  firstStep: GuideStep;
+}
+
 export interface GuideCompletion {
   kind: "complete";
   summary: string;
 }
 
-export type GuideResponse = GuideStep | GuideCompletion;
+export type GuideResponse = GuideOffer | GuideStep | GuideCompletion;
 
 export type GuideTheme = "light" | "dark";
 
-export interface GuideOverlayRequest extends GuideStep {
+export interface GuideOverlayRequest {
+  mode: "offer" | "step" | "thinking";
+  caption: string;
+  target?: GuideTarget | null;
+  stepIndex: number;
+  estimatedStepsLeft: number;
   theme: GuideTheme;
   isRtl: boolean;
 }

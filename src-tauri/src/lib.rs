@@ -16,8 +16,10 @@ mod workspace;
 use capture::{capture_full_screen, capture_screen_region, CaptureRect, ScreenCapture};
 use dev_context::{build_developer_context, write_developer_file};
 use guide::{
-    cancel_guide as dismiss_guide, complete_guide_step as confirm_guide, show_guide_overlay,
-    GuideOverlayRequest, GUIDE_WINDOW_LABEL,
+    cancel_guide as dismiss_guide, complete_guide_step as confirm_guide,
+    request_guide_adjustment as prepare_guide_adjustment, show_guide_overlay,
+    start_guide_offer as begin_guide_offer, GuideOverlayRequest, GUIDE_ADJUSTMENT_REQUESTED_EVENT,
+    GUIDE_WINDOW_LABEL,
 };
 use history::{
     create_conversation, delete_conversation, delete_message, list_conversations, list_messages,
@@ -139,8 +141,20 @@ fn show_guide_step(app: AppHandle, request: GuideOverlayRequest) -> Result<(), S
 
 #[tauri::command]
 fn complete_guide_step(app: AppHandle) -> Result<(), String> {
-    confirm_guide(&app)?;
-    restore_main_window(&app)
+    confirm_guide(&app)
+}
+
+#[tauri::command]
+fn request_guide_adjustment(app: AppHandle) -> Result<(), String> {
+    prepare_guide_adjustment(&app)?;
+    restore_main_window(&app)?;
+    app.emit(GUIDE_ADJUSTMENT_REQUESTED_EVENT, ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn start_guide_offer(app: AppHandle) -> Result<(), String> {
+    begin_guide_offer(&app)
 }
 
 #[tauri::command]
@@ -529,7 +543,9 @@ pub fn run() {
             capture_selected_region,
             capture_current_ui_context,
             show_guide_step,
+            start_guide_offer,
             complete_guide_step,
+            request_guide_adjustment,
             cancel_guide_step,
             cancel_region_selection,
             bootstrap_managed_provider,

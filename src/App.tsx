@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { OctopusMascot } from "./components/OctopusMascot";
 import { GuideOverlay } from "./components/GuideOverlay";
+import { GuideHighlight } from "./components/GuideHighlight";
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
@@ -18,11 +19,13 @@ import { useProviders } from "./features/providers";
 import { useAppSettings } from "./features/settings";
 import { useAppUpdates } from "./features/updates";
 import { useGuideSession } from "./features/guide";
+import { showGuideStep } from "./features/guide/guideCommands";
 
 function App() {
   const activeWindow = new URLSearchParams(window.location.search).get("window");
   if (activeWindow === "region-selector") return <RegionSelector />;
   if (activeWindow === "guide-overlay") return <GuideOverlay />;
+  if (activeWindow === "guide-highlight") return <GuideHighlight />;
   return <MainOverlay />;
 }
 
@@ -34,6 +37,7 @@ function MainOverlay() {
   const [activePanel, setActivePanel] = useState<Panel>("chat");
   const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
   const [showClosePrompt, setShowClosePrompt] = useState(false);
+  const [guideComposerFocusKey, setGuideComposerFocusKey] = useState(0);
   const [developerContextStatus, setDeveloperContextStatus] = useState<DeveloperContextStatus | null>(null);
   const [developerEditStatus, setDeveloperEditStatus] = useState<DeveloperEditStatus | null>(null);
 
@@ -150,6 +154,11 @@ function MainOverlay() {
       if (freshContext) {
         return [freshContext];
       }
+
+      setCaptureError(isRtl
+        ? "تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. لن يستخدم لقطة قديمة."
+        : "Waey could not read the current screen structure for this message, so it will not use stale context.");
+      return [];
     }
 
     const latestContext = latestUiContexts
@@ -157,9 +166,9 @@ function MainOverlay() {
       .sort((left, right) => right.capturedAt - left.capturedAt)[0];
 
     return latestContext ? [latestContext] : [];
-  }, [latestUiContexts, setCaptureError, settings.attachUiContext]);
+  }, [isRtl, latestUiContexts, setCaptureError, settings.attachUiContext]);
 
-  const continueGuide = useCallback(async (step: GuideStep) => {
+  const continueGuide = useCallback(async (step: GuideStep, onContextCaptured: () => void) => {
     if (!selectedProvider) {
       throw new Error("Select an API provider to continue the guide.");
     }
@@ -167,6 +176,7 @@ function MainOverlay() {
     clearCaptures();
     const freshCapture = await captureCurrentScreen();
     const uiContexts = freshCapture.uiContext ? [freshCapture.uiContext] : await freshPromptUiContexts();
+    onContextCaptured();
     const continuationPrompt = `The user confirmed guide step ${step.stepIndex}. Inspect the fresh screen context and provide exactly one next guide step, or complete the guide if the task is finished.`;
 
     await submitPrompt(
@@ -178,14 +188,21 @@ function MainOverlay() {
       uiContexts,
       null,
       true,
+      true,
     );
   }, [clearCaptures, freshPromptUiContexts, selectedPersona, selectedProvider, submitPrompt]);
 
-  const { beginGuide, cancelGuide } = useGuideSession({
+  const handleGuideAdjustmentRequested = useCallback(() => {
+    setActivePanel("chat");
+    setGuideComposerFocusKey((currentKey) => currentKey + 1);
+  }, []);
+
+  const { beginGuide, beginGuideAdjustmentFollowUp, cancelGuide } = useGuideSession({
     isDark,
     isRtl,
     messages,
     onContinueGuide: continueGuide,
+    onGuideAdjustmentRequested: handleGuideAdjustmentRequested,
     onError: setCaptureError,
     streamState,
   });
@@ -228,11 +245,47 @@ function MainOverlay() {
       return;
     }
 
+    const adjustmentStep = guideMode ? null : beginGuideAdjustmentFollowUp();
+
     setActivePanel("chat");
     if (guideMode) {
       beginGuide();
     }
     const { developerContext, uiContexts } = await promptWithDeveloperContext(prompt);
+
+    if (adjustmentStep) {
+      try {
+        await showGuideStep({
+          mode: "thinking",
+          caption: isRtl
+            ? "Waey يفحص الشاشة ويعيد ضبط الإرشاد."
+            : "Waey is checking the screen and adjusting the guide.",
+          target: null,
+          stepIndex: 0,
+          estimatedStepsLeft: 0,
+          theme: isDark ? "dark" : "light",
+          isRtl,
+        });
+      } catch (error) {
+        await cancelGuide();
+        setCaptureError(error instanceof Error ? error.message : String(error));
+        return;
+      }
+
+      const continuationPrompt = `The user needs a different route for guide step ${adjustmentStep.stepIndex}. Their clarification is: ${prompt}\nInspect the fresh screen observation and provide exactly one next guide step, or complete the guide if the task is finished.`;
+
+      return submitPrompt(
+        prompt,
+        selectedProvider,
+        [],
+        selectedPersona,
+        continuationPrompt,
+        uiContexts,
+        developerContext,
+        true,
+        true,
+      );
+    }
 
     return submitPrompt(prompt, selectedProvider, captures, selectedPersona, prompt, uiContexts, developerContext, guideMode);
   }
@@ -441,6 +494,7 @@ function MainOverlay() {
                   await cancelGuide();
                 }}
                 onSubmitPrompt={submitPromptWithDeveloperContext}
+                focusPromptKey={guideComposerFocusKey}
                 streamState={streamState}
                 isRtl={isRtl}
                 developerModeEnabled={settings.developerModeEnabled}

@@ -11,6 +11,7 @@ interface SendPromptInput {
   uiContexts?: UiContextSnapshot[];
   developerContext?: string | null;
   guideMode?: boolean;
+  guideContinuation?: boolean;
   persona: Persona | null;
   requestId: string;
   historyMessages: ChatMessage[];
@@ -26,6 +27,7 @@ export function sendLlmPrompt({
   uiContexts,
   developerContext,
   guideMode = false,
+  guideContinuation = false,
   persona,
   requestId,
   historyMessages,
@@ -48,6 +50,7 @@ export function sendLlmPrompt({
       uiContexts: attachedUiContext ? [attachedUiContext] : undefined,
       developerContext: developerContext?.trim() || undefined,
       guideMode,
+      guideContinuation,
       historyMessages: historyMessages.map((message) => ({
         role: message.role,
         content: message.content,

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { DeveloperAccessLevel, StreamState } from "../shared/types";
 
@@ -12,6 +12,7 @@ interface ChatComposerProps {
   developerWorkspaces: string[];
   onChangeDeveloperAccessLevel: (accessLevel: DeveloperAccessLevel) => void;
   onChangeDeveloperWorkspaces: (workspaces: string[]) => Promise<void>;
+  focusPromptKey: number;
 }
 
 const accessOptions: Array<{
@@ -50,14 +51,26 @@ export function ChatComposer({
   developerWorkspaces,
   onChangeDeveloperAccessLevel,
   onChangeDeveloperWorkspaces,
+  focusPromptKey,
 }: ChatComposerProps) {
   const [prompt, setPrompt] = useState("");
   const [guideMode, setGuideMode] = useState(false);
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = streamState === "streaming";
   const activeAccess = accessOptions.find((option) => option.id === developerAccessLevel) ?? accessOptions[1];
   const activeWorkspace = developerWorkspaces[developerWorkspaces.length - 1] ?? null;
+
+  useEffect(() => {
+    if (focusPromptKey === 0) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => promptInputRef.current?.focus());
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [focusPromptKey]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -206,6 +219,7 @@ export function ChatComposer({
         placeholder={isRtl ? "اسأل Waey عن شاشتك..." : "Ask Waey about your screen..."}
         value={prompt}
         rows={2}
+        ref={promptInputRef}
         dir={isRtl ? "rtl" : "ltr"}
       />
       {isStreaming ? (

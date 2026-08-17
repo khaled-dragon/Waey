@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { completeGuideStep, cancelGuideStep } from "../features/guide/guideCommands";
+import { completeGuideStep, cancelGuideStep, requestGuideAdjustment, startGuideOffer } from "../features/guide/guideCommands";
 import type { GuideOverlayRequest } from "../shared/types";
 import { OctopusMascot } from "./OctopusMascot";
 
@@ -26,13 +26,21 @@ export function GuideOverlay() {
     return <div className="guide-overlay-stage" />;
   }
 
-  const direction = guide.target?.bounds ? "targeted" : "thinking";
+  const direction = guide.mode === "step" && guide.target?.bounds ? "targeted" : "thinking";
   const estimatedTotal = guide.stepIndex + guide.estimatedStepsLeft;
-  const progress = guide.isRtl
+  const progress = guide.mode === "thinking"
+    ? (guide.isRtl ? "جارٍ التحقق من الخطوة" : "Checking the next step")
+    : guide.mode === "offer"
+      ? (guide.isRtl ? `حوالي ${estimatedTotal} خطوات` : `About ${estimatedTotal} steps`)
+      : guide.isRtl
     ? (guide.estimatedStepsLeft > 0 ? `الخطوة ${guide.stepIndex} من حوالي ${estimatedTotal}` : `الخطوة ${guide.stepIndex}`)
     : (guide.estimatedStepsLeft > 0 ? `Step ${guide.stepIndex} of about ${estimatedTotal}` : `Step ${guide.stepIndex}`);
   const cancelLabel = guide.isRtl ? "إلغاء" : "Cancel";
-  const doneLabel = guide.isRtl ? "تم" : "Done";
+  const adjustmentLabel = guide.isRtl ? "شيء آخر" : "Something else";
+  const primaryLabel = guide.mode === "offer"
+    ? (guide.isRtl ? "ابدأ الإرشاد" : "Start guide")
+    : (guide.isRtl ? "تم" : "I did it");
+  const targetLabel = guide.target?.label?.trim();
 
   return (
     <div className={`guide-overlay-stage guide-overlay-stage--${guide.theme}`} dir={guide.isRtl ? "rtl" : "ltr"}>
@@ -43,10 +51,22 @@ export function GuideOverlay() {
         <div className="guide-popover-copy">
           <div className="guide-popover-progress">{progress}</div>
           <div className="guide-popover-caption">{guide.caption}</div>
+          {targetLabel && guide.mode === "step" && <div className="guide-popover-target">{targetLabel}</div>}
         </div>
         <div className="guide-popover-actions">
           <button className="guide-action guide-action--quiet" onClick={() => void cancelGuideStep()} type="button">{cancelLabel}</button>
-          <button className="guide-action guide-action--confirm" onClick={() => void completeGuideStep()} type="button">{doneLabel}</button>
+          {guide.mode === "step" && (
+            <button className="guide-action guide-action--quiet" onClick={() => void requestGuideAdjustment()} type="button">{adjustmentLabel}</button>
+          )}
+          {guide.mode !== "thinking" && (
+            <button
+              className="guide-action guide-action--confirm"
+              onClick={() => void (guide.mode === "offer" ? startGuideOffer() : completeGuideStep())}
+              type="button"
+            >
+              {primaryLabel}
+            </button>
+          )}
         </div>
       </section>
     </div>
