@@ -68,7 +68,7 @@ export function GuideOverlay() {
           onPointerDown={beginDragging}
         />
         <div className="guide-popover-mascot">
-          <OctopusMascot size={48} state={direction === "thinking" ? "thinking" : "idle"} />
+          <OctopusMascot size={48} state={direction === "thinking" ? "thinking" : "idle"} useThinkingAsset />
         </div>
         <div className="guide-popover-copy">
           <div className="guide-popover-progress">{progress}</div>

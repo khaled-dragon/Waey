@@ -8,8 +8,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const COLLECTION_TIMEOUT: Duration = Duration::from_millis(4_000);
-const COLLECTOR_VERSION: &str = "v4";
+const COLLECTION_TIMEOUT: Duration = Duration::from_millis(10_000);
+const COLLECTOR_VERSION: &str = "v6";
 
 pub fn capture_foreground_window_handle() -> Option<isize> {
     #[cfg(target_os = "windows")]
@@ -144,7 +144,7 @@ fn ensure_collector_script(path: &PathBuf) -> Result<(), String> {
 
 fn powershell_file_content(script: &str) -> String {
     format!(
-        "param([string]$OutputFile, [bool]$AllowClipboardSelection = $false, [Int64]$TargetHwnd = 0)\n{script}"
+        "param([string]$OutputFile, [switch]$AllowClipboardSelection, [Int64]$TargetHwnd = 0)\n{script}"
     )
 }
 
@@ -157,12 +157,17 @@ fn vbs_runner_content(
     let powershell_path = std::env::var("SystemRoot")
         .map(|root| format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"))
         .unwrap_or_else(|_| "powershell.exe".to_string());
+    let clipboard_argument = if allow_clipboard_selection {
+        " -AllowClipboardSelection"
+    } else {
+        ""
+    };
     let command = format!(
-        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\" -AllowClipboardSelection ${} -TargetHwnd {}",
+        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\"{} -TargetHwnd {}",
         powershell_path,
         script_path.display(),
         output_path.display(),
-        if allow_clipboard_selection { "true" } else { "false" },
+        clipboard_argument,
         target_window_handle.unwrap_or_default(),
     );
 
@@ -577,3 +582,22 @@ $json = $snapshot | ConvertTo-Json -Depth 10 -Compress
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($OutputFile, $json, $utf8NoBom)
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::{powershell_file_content, vbs_runner_content};
+    use std::path::PathBuf;
+
+    #[test]
+    fn collector_uses_a_switch_for_optional_clipboard_selection() {
+        let script_path = PathBuf::from("C:\\temp\\collector.ps1");
+        let output_path = PathBuf::from("C:\\temp\\context.json");
+
+        let without_clipboard = vbs_runner_content(&script_path, &output_path, false, Some(42));
+        let with_clipboard = vbs_runner_content(&script_path, &output_path, true, Some(42));
+
+        assert!(!without_clipboard.contains("-AllowClipboardSelection"));
+        assert!(with_clipboard.contains("-AllowClipboardSelection"));
+        assert!(powershell_file_content("").contains("[switch]$AllowClipboardSelection"));
+    }
+}
