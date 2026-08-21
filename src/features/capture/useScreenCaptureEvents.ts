@@ -68,5 +68,15 @@ export function useScreenCaptureEvents() {
     setLatestUiContexts([]);
   }, []);
 
-  return { captureError, captures, clearCaptures, latestCapture, latestUiContexts, removeCapture, setCaptureError, setCaptures, setLatestCapture };
+  const recordUiContext = useCallback((context: UiContextSnapshot) => {
+    setLatestUiContexts((currentContexts) => {
+      const contextsWithoutSameCapture = currentContexts.filter(
+        (currentContext) => currentContext.capturedAt !== context.capturedAt,
+      );
+
+      return [...contextsWithoutSameCapture, context].slice(-MAX_SCREEN_CAPTURES);
+    });
+  }, []);
+
+  return { captureError, captures, clearCaptures, latestCapture, latestUiContexts, recordUiContext, removeCapture, setCaptureError, setCaptures, setLatestCapture };
 }

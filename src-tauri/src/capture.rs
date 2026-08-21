@@ -1,4 +1,4 @@
-use crate::ui_context::{capture_ui_context, UiContextRect, UiContextSnapshot};
+use crate::ui_context::UiContextSnapshot;
 use screenshots::Screen;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -38,10 +38,7 @@ pub struct CaptureRect {
     pub height: u32,
 }
 
-pub fn capture_full_screen(
-    include_ui_context: bool,
-    target_window_handle: Option<isize>,
-) -> Result<ScreenCapture, String> {
+pub fn capture_full_screen(_target_window_handle: Option<isize>) -> Result<ScreenCapture, String> {
     let screen = Screen::all()
         .map_err(|error| error.to_string())?
         .into_iter()
@@ -63,14 +60,13 @@ pub fn capture_full_screen(
         origin_y: screen.display_info.y,
         source: CaptureSource::FullScreen,
         created_at,
-        ui_context: capture_optional_ui_context(include_ui_context, None, target_window_handle),
+        ui_context: None,
     })
 }
 
 pub fn capture_screen_region(
     rect: CaptureRect,
-    include_ui_context: bool,
-    target_window_handle: Option<isize>,
+    _target_window_handle: Option<isize>,
 ) -> Result<ScreenCapture, String> {
     if rect.width == 0 || rect.height == 0 {
         return Err("Capture region must have a positive width and height.".to_string());
@@ -86,13 +82,6 @@ pub fn capture_screen_region(
     image.save(&path).map_err(|error| error.to_string())?;
     prune_old_captures();
 
-    let ui_region = UiContextRect {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-    };
-
     Ok(ScreenCapture {
         path: path_to_string(path),
         width: image.width(),
@@ -101,32 +90,8 @@ pub fn capture_screen_region(
         origin_y: rect.y,
         source: CaptureSource::Region,
         created_at,
-        ui_context: capture_optional_ui_context(
-            include_ui_context,
-            Some(ui_region),
-            target_window_handle,
-        ),
+        ui_context: None,
     })
-}
-
-fn capture_optional_ui_context(
-    include_ui_context: bool,
-    region: Option<UiContextRect>,
-    target_window_handle: Option<isize>,
-) -> Option<UiContextSnapshot> {
-    if !include_ui_context {
-        return None;
-    }
-
-    match capture_ui_context(region, false, target_window_handle) {
-        Ok(context) => context,
-        Err(error) => {
-            crate::logger::warn(format!(
-                "screen context was unavailable during image capture: {error}"
-            ));
-            None
-        }
-    }
 }
 
 fn capture_path(prefix: &str, created_at: u128) -> Result<PathBuf, String> {

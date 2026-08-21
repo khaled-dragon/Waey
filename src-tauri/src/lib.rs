@@ -81,7 +81,7 @@ fn capture_current_screen(app: AppHandle) -> Result<ScreenCapture, String> {
     let target_window_handle = screen_context_target_handle(&app);
     hide_window_safely(&app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_full_screen(attach_ui_context(&app), target_window_handle);
+    let capture_result = capture_full_screen(target_window_handle);
 
     restore_main_window(&app)?;
 
@@ -102,7 +102,7 @@ fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCa
     let target_window_handle = screen_context_target_handle(&app);
     hide_window_safely(&app, REGION_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result = capture_screen_region(rect, attach_ui_context(&app), target_window_handle);
+    let capture_result = capture_screen_region(rect, target_window_handle);
 
     restore_main_window(&app)?;
 
@@ -128,8 +128,6 @@ fn capture_current_ui_context(
     }
 
     let target_window_handle = screen_context_target_handle(&app);
-    hide_window_safely(&app, MAIN_WINDOW_LABEL);
-    std::thread::sleep(std::time::Duration::from_millis(80));
     let context_result = capture_ui_context(None, allow_clipboard_selection, target_window_handle);
     if let Err(error) = &context_result {
         logger::warn(format!(
@@ -137,9 +135,6 @@ fn capture_current_ui_context(
             target_window_handle
         ));
     }
-    let restore_result = restore_main_window(&app);
-
-    restore_result?;
     context_result
 }
 
@@ -318,8 +313,7 @@ fn show_overlay(app: &AppHandle) -> Result<(), String> {
 
     hide_window_safely(app, MAIN_WINDOW_LABEL);
     std::thread::sleep(std::time::Duration::from_millis(150));
-    let capture_result =
-        capture_full_screen(attach_ui_context(app), screen_context_target_handle(app));
+    let capture_result = capture_full_screen(screen_context_target_handle(app));
 
     restore_main_window(app)?;
 

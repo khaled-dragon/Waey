@@ -4,12 +4,12 @@ use super::{
 };
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const COLLECTION_TIMEOUT: Duration = Duration::from_millis(10_000);
-const COLLECTOR_VERSION: &str = "v6";
+const COLLECTION_TIMEOUT: Duration = Duration::from_millis(4_000);
+const COLLECTOR_VERSION: &str = "v7";
 
 pub fn capture_foreground_window_handle() -> Option<isize> {
     #[cfg(target_os = "windows")]
@@ -72,7 +72,6 @@ fn run_collector(
 ) -> Result<String, String> {
     let run_id = format!("{}_{}", std::process::id(), timestamp_millis());
     let script_path = collector_script_path();
-    let runner_path = temporary_file_path(&run_id, "vbs");
     let output_path = temporary_file_path(&run_id, "json");
 
     let directory = script_path
@@ -80,25 +79,14 @@ fn run_collector(
         .ok_or_else(|| "Unable to resolve the UI Automation working directory.".to_string())?;
     fs::create_dir_all(directory).map_err(|error| error.to_string())?;
     ensure_collector_script(&script_path)?;
-    fs::write(
-        &runner_path,
-        vbs_runner_content(
+    let result = (|| {
+        run_powershell_hidden(
             &script_path,
             &output_path,
             allow_clipboard_selection,
             target_window_handle,
-        ),
-    )
-    .map_err(|error| error.to_string())?;
-
-    let result = (|| {
-        let output = run_wscript_hidden(&runner_path, COLLECTION_TIMEOUT)?;
-        if !output.status.success() {
-            return Err(format!(
-                "UI Automation collector exited with status {}.",
-                output.status
-            ));
-        }
+            COLLECTION_TIMEOUT,
+        )?;
 
         let json = fs::read_to_string(&output_path)
             .map_err(|error| format!("UI Automation collector did not produce output: {error}"))?;
@@ -109,7 +97,6 @@ fn run_collector(
         Ok(json)
     })();
 
-    let _ = fs::remove_file(runner_path);
     let _ = fs::remove_file(output_path);
 
     result
@@ -148,44 +135,54 @@ fn powershell_file_content(script: &str) -> String {
     )
 }
 
-fn vbs_runner_content(
+fn powershell_arguments(
     script_path: &PathBuf,
     output_path: &PathBuf,
     allow_clipboard_selection: bool,
     target_window_handle: Option<isize>,
-) -> String {
+) -> Vec<String> {
+    let mut arguments = vec![
+        "-NoLogo".to_string(),
+        "-NoProfile".to_string(),
+        "-NonInteractive".to_string(),
+        "-ExecutionPolicy".to_string(),
+        "Bypass".to_string(),
+        "-File".to_string(),
+        script_path.to_string_lossy().to_string(),
+        "-OutputFile".to_string(),
+        output_path.to_string_lossy().to_string(),
+    ];
+
+    if allow_clipboard_selection {
+        arguments.push("-AllowClipboardSelection".to_string());
+    }
+
+    arguments.push("-TargetHwnd".to_string());
+    arguments.push(target_window_handle.unwrap_or_default().to_string());
+    arguments
+}
+
+fn run_powershell_hidden(
+    script_path: &PathBuf,
+    output_path: &PathBuf,
+    allow_clipboard_selection: bool,
+    target_window_handle: Option<isize>,
+    timeout: Duration,
+) -> Result<(), String> {
+    // A direct child lets the timeout terminate the collector itself.
     let powershell_path = std::env::var("SystemRoot")
         .map(|root| format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"))
         .unwrap_or_else(|_| "powershell.exe".to_string());
-    let clipboard_argument = if allow_clipboard_selection {
-        " -AllowClipboardSelection"
-    } else {
-        ""
-    };
-    let command = format!(
-        "\"{}\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" -OutputFile \"{}\"{} -TargetHwnd {}",
-        powershell_path,
-        script_path.display(),
-        output_path.display(),
-        clipboard_argument,
-        target_window_handle.unwrap_or_default(),
-    );
-
-    format!(
-        "Set shell = CreateObject(\"WScript.Shell\")\nexitCode = shell.Run(\"{}\", 0, True)\nWScript.Quit exitCode\n",
-        command.replace('"', "\"\"")
-    )
-}
-
-fn run_wscript_hidden(runner_path: &PathBuf, timeout: Duration) -> Result<Output, String> {
-    let runner_path = runner_path
-        .to_str()
-        .ok_or_else(|| "UI Automation runner path is not valid UTF-8.".to_string())?;
-    let mut command = Command::new("wscript.exe");
+    let mut command = Command::new(powershell_path);
     command
-        .args(["//B", "//NoLogo", runner_path])
+        .args(powershell_arguments(
+            script_path,
+            output_path,
+            allow_clipboard_selection,
+            target_window_handle,
+        ))
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::null());
 
     #[cfg(target_os = "windows")]
@@ -199,12 +196,14 @@ fn run_wscript_hidden(runner_path: &PathBuf, timeout: Duration) -> Result<Output
     let started_at = Instant::now();
 
     loop {
-        if child
-            .try_wait()
-            .map_err(|error| error.to_string())?
-            .is_some()
-        {
-            return child.wait_with_output().map_err(|error| error.to_string());
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return if status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "UI Automation collector exited with status {status}."
+                ))
+            };
         }
 
         if started_at.elapsed() >= timeout {
@@ -280,9 +279,9 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 
-$MaxDepth = 15
-$MaxElements = 2000
-$CollectionBudgetMs = 1150
+$MaxDepth = 10
+$MaxElements = 420
+$CollectionBudgetMs = 700
 $TerminalRoles = @('DataItem', 'Cell', 'TreeItem')
 $ScaffoldRoles = @('Pane', 'Group', 'Custom')
 
@@ -363,19 +362,6 @@ function Get-ParentTrail($element) {
   return $trail.ToArray()
 }
 
-function Get-ChildCount($element) {
-  try {
-    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
-    $count = 0
-    $child = $walker.GetFirstChild($element)
-    while ($null -ne $child -and $count -lt 999) {
-      $count++
-      $child = $walker.GetNextSibling($child)
-    }
-    return $count
-  } catch { return 0 }
-}
-
 function Convert-Element($element, [int]$cursorX, [int]$cursorY, [int]$depth) {
   try {
     $isPassword = [bool]$element.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsPasswordProperty)
@@ -385,14 +371,15 @@ function Convert-Element($element, [int]$cursorX, [int]$cursorY, [int]$depth) {
 
     $role = Get-ControlTypeName $element
     $name = Clean-Text $element.Current.Name 240
-    $value = Get-ElementText $element $role
-    $selectedText = Get-SelectedText $element
     $automationId = Clean-Text $element.Current.AutomationId 160
     $className = Clean-Text $element.Current.ClassName 160
     $isOffscreen = [bool]$element.Current.IsOffscreen
     $isEnabled = [bool]$element.Current.IsEnabled
     $focused = [bool]$element.Current.HasKeyboardFocus
     $underCursor = $cursorX -ge $rect.Left -and $cursorX -le $rect.Right -and $cursorY -ge $rect.Top -and $cursorY -le $rect.Bottom
+    $includeLongText = $focused -or $underCursor
+    $value = if ($includeLongText) { Get-ElementText $element $role } else { $null }
+    $selectedText = if ($role -in @('Edit', 'Document')) { Get-SelectedText $element } else { $null }
 
     if ([string]::IsNullOrWhiteSpace($name) -and [string]::IsNullOrWhiteSpace($value) -and [string]::IsNullOrWhiteSpace($selectedText) -and -not $focused -and -not $underCursor) { return $null }
 
@@ -414,8 +401,8 @@ function Convert-Element($element, [int]$cursorX, [int]$cursorY, [int]$depth) {
       isEnabled = $isEnabled
       isOffscreen = $isOffscreen
       depth = [uint16]$depth
-      childCount = [uint16](Get-ChildCount $element)
-      parentTrail = @(Get-ParentTrail $element)
+      childCount = [uint16]0
+      parentTrail = if ($focused -or $underCursor -or $selectedText) { @(Get-ParentTrail $element) } else { @() }
     }
   } catch { return $null }
 }
@@ -451,9 +438,9 @@ function Walk-Elements($root, [int]$cursorX, [int]$cursorY) {
 function Get-VisibleWindows {
   $items = New-Object System.Collections.Generic.List[object]
   try {
-    $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($window in $windows) {
-      if ($items.Count -ge 12) { break }
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $window = $walker.GetFirstChild([System.Windows.Automation.AutomationElement]::RootElement)
+    while ($null -ne $window -and $items.Count -lt 8) {
       try {
         $rect = $window.Current.BoundingRectangle
         $title = Clean-Text $window.Current.Name 240
@@ -466,6 +453,7 @@ function Get-VisibleWindows {
           bounds = [PSCustomObject]@{ x = [int]$rect.Left; y = [int]$rect.Top; width = [uint32]$rect.Width; height = [uint32]$rect.Height }
         })
       } catch {}
+      $window = $walker.GetNextSibling($window)
     }
   } catch {}
   return $items.ToArray()
@@ -525,7 +513,7 @@ if ($targetHandle -ne [IntPtr]::Zero -and [WaeyNativeWindow]::IsChromiumWindow($
   } catch {}
 
   Wake-ChromiumAccessibility $targetHandle
-  for ($attempt = 0; $attempt -lt 6; $attempt++) {
+  for ($attempt = 0; $attempt -lt 4; $attempt++) {
     if ((Get-ShallowElementCount $activeWindow) -gt 10) { break }
     Start-Sleep -Milliseconds 100
     try { $activeWindow = [System.Windows.Automation.AutomationElement]::FromHandle($targetHandle) } catch {}
@@ -540,6 +528,18 @@ $focusedElement = $null
 $pointedElement = $null
 try { $focusedElement = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
 try { $pointedElement = [System.Windows.Automation.AutomationElement]::FromPoint($cursor) } catch {}
+
+if ($null -ne $activeWindow) {
+  try {
+    $targetProcessId = $activeWindow.Current.ProcessId
+    if ($null -ne $focusedElement -and $focusedElement.Current.ProcessId -ne $targetProcessId) {
+      $focusedElement = $null
+    }
+    if ($null -ne $pointedElement -and $pointedElement.Current.ProcessId -ne $targetProcessId) {
+      $pointedElement = $null
+    }
+  } catch {}
+}
 
 $activeWindowTitle = $null
 $activeAppName = $null
@@ -585,7 +585,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 #[cfg(test)]
 mod tests {
-    use super::{powershell_file_content, vbs_runner_content};
+    use super::{powershell_arguments, powershell_file_content};
     use std::path::PathBuf;
 
     #[test]
@@ -593,11 +593,15 @@ mod tests {
         let script_path = PathBuf::from("C:\\temp\\collector.ps1");
         let output_path = PathBuf::from("C:\\temp\\context.json");
 
-        let without_clipboard = vbs_runner_content(&script_path, &output_path, false, Some(42));
-        let with_clipboard = vbs_runner_content(&script_path, &output_path, true, Some(42));
+        let without_clipboard = powershell_arguments(&script_path, &output_path, false, Some(42));
+        let with_clipboard = powershell_arguments(&script_path, &output_path, true, Some(42));
 
-        assert!(!without_clipboard.contains("-AllowClipboardSelection"));
-        assert!(with_clipboard.contains("-AllowClipboardSelection"));
+        assert!(!without_clipboard
+            .iter()
+            .any(|argument| argument == "-AllowClipboardSelection"));
+        assert!(with_clipboard
+            .iter()
+            .any(|argument| argument == "-AllowClipboardSelection"));
         assert!(powershell_file_content("").contains("[switch]$AllowClipboardSelection"));
     }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { OctopusMascot } from "./components/OctopusMascot";
@@ -31,9 +31,11 @@ function App() {
 
 type Panel = "chat" | "history" | "settings";
 
+const UI_CONTEXT_REUSE_WINDOW_MS = 2_500;
+
 function MainOverlay() {
   useOverlayShortcuts();
-  const { captureError, captures, clearCaptures, latestCapture, latestUiContexts, removeCapture, setCaptureError } = useScreenCaptureEvents();
+  const { captureError, captures, clearCaptures, latestCapture, latestUiContexts, recordUiContext, removeCapture, setCaptureError } = useScreenCaptureEvents();
   const [activePanel, setActivePanel] = useState<Panel>("chat");
   const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
   const [showClosePrompt, setShowClosePrompt] = useState(false);
@@ -41,6 +43,7 @@ function MainOverlay() {
   const [guideUiContext, setGuideUiContext] = useState<UiContextSnapshot | null>(null);
   const [developerContextStatus, setDeveloperContextStatus] = useState<DeveloperContextStatus | null>(null);
   const [developerEditStatus, setDeveloperEditStatus] = useState<DeveloperEditStatus | null>(null);
+  const pendingUiContextCapture = useRef<Promise<UiContextSnapshot | null> | null>(null);
 
   const { isLoadingSettings, settings, settingsError, updateSettings } = useAppSettings();
   const { checkForUpdate, dismissUpdate, installUpdate, updateState } = useAppUpdates();
@@ -51,6 +54,33 @@ function MainOverlay() {
 
   const isRtl = settings.language === "ar";
   const isDark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
+  const captureFreshUiContext = useCallback(async (allowClipboardSelection = false) => {
+    if (!allowClipboardSelection && pendingUiContextCapture.current) {
+      return pendingUiContextCapture.current;
+    }
+
+    const capturePromise = captureCurrentUiContext(allowClipboardSelection)
+      .then((context) => {
+        if (context) {
+          recordUiContext(context);
+          setCaptureError(null);
+        }
+
+        return context;
+      });
+
+    if (!allowClipboardSelection) {
+      pendingUiContextCapture.current = capturePromise;
+      void capturePromise.finally(() => {
+        if (pendingUiContextCapture.current === capturePromise) {
+          pendingUiContextCapture.current = null;
+        }
+      });
+    }
+
+    return capturePromise;
+  }, [recordUiContext, setCaptureError]);
 
   useEffect(() => {
     const savedProviderId = settings.selectedProviderId;
@@ -75,6 +105,9 @@ function MainOverlay() {
     void listen("overlay-opened", () => {
       setActivePanel("chat");
       clearCaptures();
+      if (settings.attachUiContext) {
+        void captureFreshUiContext().catch(() => undefined);
+      }
     }).then((unlisten) => {
       if (!isMounted) {
         unlisten();
@@ -88,7 +121,7 @@ function MainOverlay() {
       isMounted = false;
       removeListener?.();
     };
-  }, [clearCaptures]);
+  }, [captureFreshUiContext, clearCaptures, settings.attachUiContext]);
 
   function clearDeveloperStatuses() {
     setDeveloperContextStatus(null);
@@ -146,35 +179,41 @@ function MainOverlay() {
   }
 
   const freshPromptUiContexts = useCallback(async (allowClipboardSelection = false) => {
-    if (settings.attachUiContext) {
-      let freshContext: UiContextSnapshot | null = null;
-
-      try {
-        freshContext = await captureCurrentUiContext(allowClipboardSelection);
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        setCaptureError(isRtl
-          ? `تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. السبب: ${detail}`
-          : `Waey could not read the current screen structure for this message. Reason: ${detail}`);
-        return [];
-      }
-
-      if (freshContext) {
-        return [freshContext];
-      }
-
-      setCaptureError(isRtl
-        ? "تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. لن يستخدم لقطة قديمة."
-        : "Waey could not read the current screen structure for this message, so it will not use stale context.");
+    if (!settings.attachUiContext) {
       return [];
     }
 
     const latestContext = latestUiContexts
       .slice()
-      .sort((left, right) => right.capturedAt - left.capturedAt)[0];
+      .sort((left, right) => right.capturedAt - left.capturedAt)[0] ?? null;
 
-    return latestContext ? [latestContext] : [];
-  }, [isRtl, latestUiContexts, setCaptureError, settings.attachUiContext]);
+    if (!allowClipboardSelection
+      && latestContext
+      && Date.now() - latestContext.capturedAt <= UI_CONTEXT_REUSE_WINDOW_MS) {
+      return [latestContext];
+    }
+
+    let freshContext: UiContextSnapshot | null = null;
+
+    try {
+      freshContext = await captureFreshUiContext(allowClipboardSelection);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setCaptureError(isRtl
+        ? `تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. السبب: ${detail}`
+        : `Waey could not read the current screen structure for this message. Reason: ${detail}`);
+      return [];
+    }
+
+    if (freshContext) {
+      return [freshContext];
+    }
+
+    setCaptureError(isRtl
+      ? "تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. لن يستخدم لقطة قديمة."
+      : "Waey could not read the current screen structure for this message, so it will not use stale context.");
+    return [];
+  }, [captureFreshUiContext, isRtl, latestUiContexts, setCaptureError, settings.attachUiContext]);
 
   const continueGuide = useCallback(async (step: GuideStep, onContextCaptured: () => void) => {
     if (!selectedProvider) {
