@@ -38,9 +38,40 @@ pub fn capture_windows_ui_context(
         return Ok(None);
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        let started_at = Instant::now();
+        match super::windows_native_uia::capture(region.clone(), target_window_handle) {
+            Ok(snapshot) => return Ok(Some(finalize_snapshot(snapshot, region, started_at))),
+            Err(native_error) if legacy_fallback_enabled() => {
+                crate::logger::warn(format!(
+                    "native UI Automation failed; using explicitly enabled legacy collector: {native_error}"
+                ));
+            }
+            Err(native_error) => {
+                return Err(format!(
+                    "Native UI Automation collector failed: {native_error}"
+                ));
+            }
+        }
+    }
+
+    capture_legacy_windows_ui_context(region, allow_clipboard_selection, target_window_handle)
+}
+
+pub fn warm_up_windows_ui_automation() {
+    #[cfg(target_os = "windows")]
+    super::windows_native_uia::warm_up();
+}
+
+fn capture_legacy_windows_ui_context(
+    region: Option<UiContextRect>,
+    allow_clipboard_selection: bool,
+    target_window_handle: Option<isize>,
+) -> Result<Option<ScreenContextSnapshot>, String> {
     let started_at = Instant::now();
     let raw_snapshot = run_collector(allow_clipboard_selection, target_window_handle)?;
-    let mut snapshot =
+    let snapshot =
         serde_json::from_str::<ScreenContextSnapshot>(raw_snapshot.trim_start_matches('\u{feff}'))
             .map_err(|error| format!("UI Automation returned invalid screen data: {error}"))?;
 
@@ -55,15 +86,37 @@ pub fn capture_windows_ui_context(
         return Err("UI Automation returned no active window or readable controls.".to_string());
     }
 
+    Ok(Some(finalize_snapshot(snapshot, region, started_at)))
+}
+
+fn finalize_snapshot(
+    mut snapshot: ScreenContextSnapshot,
+    region: Option<UiContextRect>,
+    started_at: Instant,
+) -> ScreenContextSnapshot {
+    let normalized_region = region.clone();
+    let collector = snapshot.diagnostics.collector.clone();
     snapshot.schema_version = SCREEN_CONTEXT_SCHEMA_VERSION;
     snapshot.captured_at = timestamp_millis();
-    snapshot.region = region.clone();
-
-    Ok(Some(normalize_snapshot(
+    snapshot.region = region;
+    let mut normalized = normalize_snapshot(
         snapshot,
-        region.as_ref(),
+        normalized_region.as_ref(),
         started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-    )))
+    );
+    normalized.diagnostics.collector = collector;
+    normalized
+}
+
+fn legacy_fallback_enabled() -> bool {
+    matches!(
+        std::env::var("WAEY_UIA_LEGACY_FALLBACK")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 fn run_collector(

@@ -575,6 +575,7 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("waey").join("logs"));
             logger::init(log_directory);
             logger::info("Waey starting");
+            screen_intelligence::warm_up_windows_ui_automation();
             if let Err(error) = setup_tray(app) {
                 logger::error(format!("failed to initialize tray: {error}"));
             }

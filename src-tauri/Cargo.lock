@@ -5581,6 +5581,7 @@ dependencies = [
  "tauri-plugin-updater",
  "umya-spreadsheet",
  "uuid",
+ "windows 0.61.3",
 ]
 
 [[package]]

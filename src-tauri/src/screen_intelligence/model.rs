@@ -1,4 +1,4 @@
-use super::{ScreenContextCollectionStatus, ScreenIntelligenceMode};
+use super::{ScreenContextCollectionStatus, ScreenContextCollector, ScreenIntelligenceMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,6 +81,8 @@ pub struct UiElementSummary {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenContextDiagnostics {
+    #[serde(default)]
+    pub collector: ScreenContextCollector,
     pub mode: ScreenIntelligenceMode,
     pub status: ScreenContextCollectionStatus,
     pub elapsed_ms: u64,
@@ -92,6 +94,7 @@ pub struct ScreenContextDiagnostics {
 impl Default for ScreenContextDiagnostics {
     fn default() -> Self {
         Self {
+            collector: ScreenContextCollector::default(),
             mode: super::current_mode(),
             status: ScreenContextCollectionStatus::Complete,
             elapsed_ms: 0,

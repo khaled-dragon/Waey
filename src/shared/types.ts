@@ -141,7 +141,10 @@ export type ScreenIntelligenceMode = "compatibility" | "shadow" | "enabled";
 
 export type ScreenContextCollectionStatus = "complete" | "partial" | "unavailable";
 
+export type ScreenContextCollector = "legacyPowerShell" | "nativeUia";
+
 export interface ScreenContextDiagnostics {
+  collector: ScreenContextCollector;
   mode: ScreenIntelligenceMode;
   status: ScreenContextCollectionStatus;
   elapsedMs: number;

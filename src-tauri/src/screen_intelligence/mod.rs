@@ -1,12 +1,16 @@
 mod model;
 mod normalizer;
+#[cfg(target_os = "windows")]
+mod windows_native_uia;
 mod windows_uia;
 
 pub use model::{
     ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
     UiElementSummary, VisibleWindowSummary,
 };
-pub use windows_uia::{capture_foreground_window_handle, capture_windows_ui_context};
+pub use windows_uia::{
+    capture_foreground_window_handle, capture_windows_ui_context, warm_up_windows_ui_automation,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +32,17 @@ pub enum ScreenContextCollectionStatus {
     Complete,
     Partial,
     Unavailable,
+}
+
+/// Identifies the process that produced a snapshot. This is diagnostic data,
+/// not model context, and makes collector regressions visible without exposing
+/// implementation details to a provider.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ScreenContextCollector {
+    #[default]
+    LegacyPowerShell,
+    NativeUia,
 }
 
 pub fn current_mode() -> ScreenIntelligenceMode {
@@ -56,6 +71,7 @@ pub fn collection_diagnostics(
     }
 
     ScreenContextDiagnostics {
+        collector: ScreenContextCollector::default(),
         mode: current_mode(),
         status: if truncated {
             ScreenContextCollectionStatus::Partial

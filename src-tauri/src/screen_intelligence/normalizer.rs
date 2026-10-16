@@ -12,6 +12,9 @@ pub fn normalize_snapshot(
     region: Option<&UiContextRect>,
     elapsed_ms: u64,
 ) -> ScreenContextSnapshot {
+    let source_collector = snapshot.diagnostics.collector.clone();
+    let source_truncated = snapshot.diagnostics.truncated;
+    let source_warnings = std::mem::take(&mut snapshot.diagnostics.warnings);
     snapshot.active_window_title = clean_optional(snapshot.active_window_title, MAX_NAME_LENGTH);
     snapshot.active_app_name = clean_optional(snapshot.active_app_name, 120);
     snapshot.selected_text = clean_optional(snapshot.selected_text, MAX_SELECTED_TEXT_LENGTH);
@@ -43,10 +46,15 @@ pub fn normalize_snapshot(
         .collect::<Vec<_>>();
 
     elements.sort_by_key(element_priority);
-    let truncated = elements.len() > MAX_CONTEXT_ELEMENTS;
+    let truncated = source_truncated || elements.len() > MAX_CONTEXT_ELEMENTS;
     elements.truncate(MAX_CONTEXT_ELEMENTS);
 
-    snapshot.diagnostics = collection_diagnostics(elapsed_ms, elements.len(), truncated);
+    let mut diagnostics = collection_diagnostics(elapsed_ms, elements.len(), truncated);
+    diagnostics.collector = source_collector;
+    diagnostics.warnings.extend(source_warnings);
+    diagnostics.warnings.sort();
+    diagnostics.warnings.dedup();
+    snapshot.diagnostics = diagnostics;
     snapshot.elements = elements;
     snapshot
 }
@@ -242,5 +250,30 @@ mod tests {
         let result = normalize_snapshot(snapshot(vec![regular, pointed]), None, 20);
 
         assert_eq!(result.elements[0].name, "Current");
+    }
+
+    #[test]
+    fn source_collection_limits_remain_visible_in_diagnostics() {
+        let mut raw_snapshot = snapshot(vec![element("Button", "Continue")]);
+        raw_snapshot.diagnostics.collector =
+            crate::screen_intelligence::ScreenContextCollector::NativeUia;
+        raw_snapshot.diagnostics.truncated = true;
+        raw_snapshot
+            .diagnostics
+            .warnings
+            .push("Native collector reached its element budget.".to_string());
+
+        let result = normalize_snapshot(raw_snapshot, None, 20);
+
+        assert!(result.diagnostics.truncated);
+        assert_eq!(
+            result.diagnostics.collector,
+            crate::screen_intelligence::ScreenContextCollector::NativeUia
+        );
+        assert!(result
+            .diagnostics
+            .warnings
+            .iter()
+            .any(|warning| warning == "Native collector reached its element budget."));
     }
 }
