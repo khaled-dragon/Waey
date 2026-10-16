@@ -33,6 +33,7 @@ use providers::{
     delete_provider, list_providers, save_provider, LlmProvider, ManagedProviderUpdate,
     ProviderDraft,
 };
+use screen_intelligence::{DesktopActionExecutionRequest, DesktopActionResult};
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
 use spreadsheet::apply_developer_spreadsheet_edit;
@@ -151,6 +152,49 @@ fn capture_current_ui_context(
         ));
     }
     context_result
+}
+
+/// Applies one renderer-approved semantic action. This intentionally accepts no
+/// coordinates, keyboard input, shell command, or file operation. The native
+/// UIA worker re-reads the original window and invokes only an exact, safe
+/// control match before returning success.
+#[tauri::command]
+async fn execute_desktop_action(
+    app: AppHandle,
+    request: DesktopActionExecutionRequest,
+) -> Result<DesktopActionResult, String> {
+    if !request.approved {
+        return Err("Desktop actions require a direct approval in Waey.".to_string());
+    }
+
+    if !attach_ui_context(&app) {
+        return Err("Enable screen context before applying a verified desktop action.".to_string());
+    }
+
+    screen_intelligence::validate_desktop_action(&request.action)?;
+    let target_window_handle = screen_context_target_handle(&app)
+        .filter(|handle| *handle != 0)
+        .ok_or_else(|| {
+            "Open Waey from the app you want to control, then request the action again.".to_string()
+        })?;
+
+    logger::info("applying an approved, verified semantic desktop action");
+    hide_window_safely(&app, MAIN_WINDOW_LABEL);
+    let action = request.action;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        screen_intelligence::execute_desktop_action(action, Some(target_window_handle))
+    })
+    .await
+    .map_err(|error| format!("Desktop action worker ended unexpectedly: {error}"));
+
+    if let Err(error) = restore_main_window(&app) {
+        logger::error(format!(
+            "failed to restore Waey after desktop action: {error}"
+        ));
+        return Err(error);
+    }
+
+    Ok(result??)
 }
 
 #[tauri::command]
@@ -654,6 +698,7 @@ pub fn run() {
             capture_current_screen,
             capture_selected_region,
             capture_current_ui_context,
+            execute_desktop_action,
             show_guide_step,
             start_guide_offer,
             complete_guide_step,

@@ -1,6 +1,6 @@
 use super::{
-    normalizer::normalize_snapshot, ScreenContextSnapshot, UiContextRect,
-    SCREEN_CONTEXT_SCHEMA_VERSION,
+    normalizer::normalize_snapshot, DesktopAction, DesktopActionResult, ScreenContextSnapshot,
+    UiContextRect, SCREEN_CONTEXT_SCHEMA_VERSION,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -74,6 +74,30 @@ pub fn capture_windows_ui_context(
 pub fn warm_up_windows_ui_automation() {
     #[cfg(target_os = "windows")]
     super::windows_native_uia::warm_up();
+}
+
+/// Executes only an already validated semantic action against the window that
+/// produced the current UI context. The persistent native worker re-resolves
+/// the control before invoking it; no coordinates or shell command are used.
+pub fn execute_desktop_action(
+    action: DesktopAction,
+    target_window_handle: Option<isize>,
+) -> Result<DesktopActionResult, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let target_window_handle = target_window_handle
+            .filter(|handle| *handle != 0)
+            .ok_or_else(|| {
+                "Open Waey from the target app before applying a desktop action.".to_string()
+            })?;
+        return super::windows_native_uia::invoke(action, target_window_handle);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (action, target_window_handle);
+        Err("Verified desktop actions are currently available on Windows only.".to_string())
+    }
 }
 
 fn capture_legacy_windows_ui_context(

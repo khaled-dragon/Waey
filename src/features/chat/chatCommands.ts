@@ -12,6 +12,7 @@ interface SendPromptInput {
   developerContext?: string | null;
   guideMode?: boolean;
   guideContinuation?: boolean;
+  actionMode?: boolean;
   persona: Persona | null;
   requestId: string;
   historyMessages: ChatMessage[];
@@ -28,6 +29,7 @@ export function sendLlmPrompt({
   developerContext,
   guideMode = false,
   guideContinuation = false,
+  actionMode = false,
   persona,
   requestId,
   historyMessages,
@@ -51,6 +53,7 @@ export function sendLlmPrompt({
       developerContext: developerContext?.trim() || undefined,
       guideMode,
       guideContinuation,
+      actionMode,
       historyMessages: historyMessages.map((message) => ({
         role: message.role,
         content: message.content,

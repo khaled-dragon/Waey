@@ -55,6 +55,7 @@ export function useLlmChat({
       developerContext?: string | null,
       guideMode = false,
       guideContinuation = false,
+      actionMode = false,
     ) => {
       const trimmedPrompt = prompt.trim();
       const trimmedRequestPrompt = (requestPrompt ?? prompt).trim();
@@ -113,6 +114,7 @@ export function useLlmChat({
           developerContext,
           guideMode,
           guideContinuation,
+          actionMode,
           persona,
           requestId,
           historyMessages,

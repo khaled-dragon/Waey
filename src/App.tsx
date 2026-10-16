@@ -8,7 +8,8 @@ import { ChatComposer } from "./components/ChatComposer";
 import { ConversationHistoryPanel } from "./components/ConversationHistoryPanel";
 import { ResponsePanel } from "./components/ResponsePanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import type { DeveloperContextStatus, DeveloperEditStatus, GuideStep, PersonaDraft, ProviderDraft, UiContextSnapshot } from "./shared/types";
+import type { DesktopAction, DeveloperContextStatus, DeveloperEditStatus, GuideStep, PersonaDraft, ProviderDraft, UiContextSnapshot } from "./shared/types";
+import { executeDesktopAction } from "./features/actions";
 import { useLlmChat } from "./features/chat";
 import { RegionSelector, useScreenCaptureEvents, captureCurrentScreen, captureCurrentUiContext } from "./features/capture";
 import { applyDeveloperSpreadsheetEdit, buildDeveloperContext, writeDeveloperFile, type DeveloperFileAction } from "./features/dev";
@@ -281,7 +282,7 @@ function MainOverlay() {
     return { developerContext, uiContexts };
   }
 
-  async function submitPromptWithDeveloperContext(prompt: string, guideMode = false) {
+  async function submitPromptWithDeveloperContext(prompt: string, guideMode = false, actionMode = false) {
     if (!selectedProvider) {
       setActivePanel("settings");
       return;
@@ -332,7 +333,28 @@ function MainOverlay() {
       );
     }
 
-    return submitPrompt(prompt, selectedProvider, captures, selectedPersona, prompt, uiContexts, developerContext, guideMode);
+    return submitPrompt(
+      prompt,
+      selectedProvider,
+      captures,
+      selectedPersona,
+      prompt,
+      uiContexts,
+      developerContext,
+      guideMode,
+      false,
+      actionMode,
+    );
+  }
+
+  async function applyDesktopAction(action: DesktopAction) {
+    try {
+      return await executeDesktopAction(action);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCaptureError(message);
+      throw error;
+    }
   }
 
   async function editLastUserMessageWithDeveloperContext(messageId: string, prompt: string) {
@@ -526,6 +548,7 @@ function MainOverlay() {
                 onEditLastUserMessage={editLastUserMessageWithDeveloperContext}
                 onApplyDeveloperEdit={applyDeveloperEdit}
                 onApplySpreadsheetEdit={applySpreadsheetEdit}
+                onExecuteDesktopAction={applyDesktopAction}
                 onRemoveCapture={removeCapture}
                 streamState={streamState}
                 isRtl={isRtl}
@@ -542,6 +565,7 @@ function MainOverlay() {
                 focusPromptKey={guideComposerFocusKey}
                 streamState={streamState}
                 isRtl={isRtl}
+                screenContextEnabled={settings.attachUiContext}
                 developerModeEnabled={settings.developerModeEnabled}
                 developerAccessLevel={settings.developerAccessLevel}
                 developerWorkspaces={settings.developerWorkspaces}

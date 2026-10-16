@@ -8,6 +8,15 @@
 - [x] Task 4: Build the stateful Guide Mode overlay, mascot targeting, confirmation, and recapture loop.
 - [x] Task 5: Harden Developer Mode context, selected-text capture, workspace actions, and cross-platform fallback behavior.
 
+## Desktop Interaction Follow-up
+
+- [x] Task 1: Add the native in-process UI Automation collector and retain the hidden PowerShell collector only as an explicit fallback. Commit: `f99d7cb`.
+- [x] Task 2: Add request-scoped context prefetch and a short-lived, target-aware freshness cache. Commit: `c77e5f5`.
+- [x] Task 3: Add user-approved semantic desktop action proposals with native UIA revalidation before `Invoke`.
+- [ ] Task 4: Add broader computer-use capabilities behind separate capability grants, explicit previews, and audit-safe outcomes.
+
+Task 3 deliberately supports only a verified `click` on a unique, visible, enabled `Button`, `MenuItem`, or `Hyperlink`. It never accepts coordinates, keyboard input, a shell command, a URL, or a filesystem operation. The model emits a proposal marker; the user must press Apply; then the native UIA worker resolves role, label or automation id, and bounds against the original target window before invoking it. Sensitive or destructive labels are blocked locally.
+
 ## Purpose
 
 Build a reliable, privacy-aware screen intelligence and developer workflow for Waey. The result should let supported models understand the active desktop through both a readable accessibility tree and an optional screenshot, guide a user through multi-step tasks, and safely read or edit explicitly approved local workspaces.

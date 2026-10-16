@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { capturePreviewUrl } from "../features/capture";
 import type { DeveloperFileAction } from "../features/dev";
 import { stripGuideBlocks } from "../features/guide";
-import type { ChatMessage, DeveloperAccessLevel, DeveloperContextStatus, DeveloperEditStatus, ScreenCapture, StreamState } from "../shared/types";
+import { extractDesktopAction, stripDesktopActionBlocks } from "../features/actions";
+import type { ChatMessage, DesktopAction, DesktopActionResult, DeveloperAccessLevel, DeveloperContextStatus, DeveloperEditStatus, ScreenCapture, StreamState } from "../shared/types";
 
 interface ResponsePanelProps {
   capture: ScreenCapture | null;
@@ -14,6 +15,7 @@ interface ResponsePanelProps {
   onEditLastUserMessage: (messageId: string, prompt: string) => Promise<void>;
   onApplyDeveloperEdit: (action: DeveloperFileAction) => Promise<void>;
   onApplySpreadsheetEdit: (content: string) => Promise<void>;
+  onExecuteDesktopAction: (action: DesktopAction) => Promise<DesktopActionResult>;
   onRemoveCapture: (path: string) => void;
   streamState: StreamState;
   isRtl: boolean;
@@ -22,7 +24,7 @@ interface ResponsePanelProps {
   developerAccessLevel: DeveloperAccessLevel;
 }
 
-export function ResponsePanel({ capture, captures, errorMessage, messages, developerContextStatus, developerEditStatus, onEditLastUserMessage, onApplyDeveloperEdit, onApplySpreadsheetEdit, onRemoveCapture, streamState, isRtl, workedForMs, developerModeEnabled, developerAccessLevel }: ResponsePanelProps) {
+export function ResponsePanel({ capture, captures, errorMessage, messages, developerContextStatus, developerEditStatus, onEditLastUserMessage, onApplyDeveloperEdit, onApplySpreadsheetEdit, onExecuteDesktopAction, onRemoveCapture, streamState, isRtl, workedForMs, developerModeEnabled, developerAccessLevel }: ResponsePanelProps) {
   const previewUrl = capture ? capturePreviewUrl(capture) : null;
   const previewItems = captures.map((captureItem) => ({
     capture: captureItem,
@@ -190,6 +192,14 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
                   {message.role === "assistant" ? <FormattedAssistantMessage content={message.content} isRtl={isRtl} onApplyDeveloperEdit={onApplyDeveloperEdit} onApplySpreadsheetEdit={onApplySpreadsheetEdit} reasoningContent={message.reasoningContent} /> : message.content}
                 </div>
               )}
+              {message.role === "assistant" && message.id === lastAssistantMessage?.id && streamState !== "streaming" && (
+                <DesktopActionProposal
+                  action={extractDesktopAction(message.content)}
+                  isRtl={isRtl}
+                  key={message.id}
+                  onExecute={onExecuteDesktopAction}
+                />
+              )}
             </div>
           ))}
           {streamState === "streaming" && !isStreamingWithContent && !isStreamingWithoutContent && (
@@ -213,6 +223,60 @@ export function ResponsePanel({ capture, captures, errorMessage, messages, devel
         )}
       </div>
     </div>
+  );
+}
+
+interface DesktopActionProposalProps {
+  action: DesktopAction | null;
+  isRtl: boolean;
+  onExecute: (action: DesktopAction) => Promise<DesktopActionResult>;
+}
+
+function DesktopActionProposal({ action, isRtl, onExecute }: DesktopActionProposalProps) {
+  const [state, setState] = useState<"ready" | "running" | "applied" | "dismissed">("ready");
+  const [error, setError] = useState<string | null>(null);
+
+  if (!action || state === "dismissed") {
+    return null;
+  }
+
+  const proposedAction = action;
+  const targetName = proposedAction.target.label ?? proposedAction.target.automationId ?? (isRtl ? "العنصر المحدد" : "the verified control");
+
+  async function applyAction() {
+    setState("running");
+    setError(null);
+
+    try {
+      await onExecute(proposedAction);
+      setState("applied");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+      setState("ready");
+    }
+  }
+
+  return (
+    <section className="desktop-action-proposal" aria-live="polite">
+      <div className="desktop-action-proposal-copy">
+        <strong>{state === "applied" ? (isRtl ? "تم تنفيذ الفعل المتحقق" : "Verified action applied") : (isRtl ? "فعل مقترح" : "Proposed action")}</strong>
+        <span>{proposedAction.summary}</span>
+        <small>{isRtl ? `سينقر Waey على ${proposedAction.target.role}: ${targetName}` : `Waey will click ${proposedAction.target.role}: ${targetName}`}</small>
+      </div>
+      {state === "applied" ? (
+        <div className="desktop-action-result">{isRtl ? "تمت المطابقة والتنفيذ." : "Target re-verified and invoked."}</div>
+      ) : (
+        <div className="desktop-action-proposal-actions">
+          <button className="btn-primary" disabled={state === "running"} onClick={() => void applyAction()} type="button">
+            {state === "running" ? (isRtl ? "جارٍ التحقق..." : "Verifying...") : (isRtl ? "تنفيذ" : "Apply")}
+          </button>
+          <button className="btn-secondary" disabled={state === "running"} onClick={() => setState("dismissed")} type="button">
+            {isRtl ? "تجاهل" : "Dismiss"}
+          </button>
+        </div>
+      )}
+      {error && <div className="desktop-action-error">{error}</div>}
+    </section>
   );
 }
 
@@ -294,7 +358,7 @@ interface FormattedAssistantMessageProps {
 function FormattedAssistantMessage({ content, isRtl, onApplyDeveloperEdit, onApplySpreadsheetEdit, reasoningContent }: FormattedAssistantMessageProps) {
   const { answer, thinking } = parseAssistantThinking(content);
   const visibleThinking = reasoningContent?.trim() || thinking;
-  const segments = parseMessageSegments(stripGuideBlocks(answer));
+  const segments = parseMessageSegments(stripDesktopActionBlocks(stripGuideBlocks(answer)));
 
   return (
     <>

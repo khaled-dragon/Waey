@@ -5,6 +5,7 @@
 //! file work that made the legacy PowerShell collector noticeably slow.
 
 use super::{
+    matches_desktop_action_target, validate_desktop_action, DesktopAction, DesktopActionResult,
     ScreenContextCollector, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
     UiElementSummary, VisibleWindowSummary,
 };
@@ -25,13 +26,13 @@ use windows::{
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
-                IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationValuePattern,
-                TreeScope_Children, TreeScope_Descendants, TreeScope_Element,
-                UIA_AutomationIdPropertyId, UIA_BoundingRectanglePropertyId,
+                IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationTextPattern,
+                IUIAutomationValuePattern, TreeScope_Children, TreeScope_Descendants,
+                TreeScope_Element, UIA_AutomationIdPropertyId, UIA_BoundingRectanglePropertyId,
                 UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_ClassNamePropertyId,
                 UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId, UIA_CustomControlTypeId,
                 UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_GroupControlTypeId,
-                UIA_HasKeyboardFocusPropertyId, UIA_HyperlinkControlTypeId,
+                UIA_HasKeyboardFocusPropertyId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
                 UIA_IsEnabledPropertyId, UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId,
                 UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId, UIA_NamePropertyId,
                 UIA_NativeWindowHandlePropertyId, UIA_PaneControlTypeId, UIA_ProcessIdPropertyId,
@@ -46,6 +47,7 @@ use windows::{
 
 const MAX_CONTEXT_ELEMENTS: usize = 420;
 const MAX_VISIBLE_WINDOWS: usize = 12;
+const MAX_ACTION_CANDIDATES: i32 = 750;
 const UIA_TRANSACTION_TIMEOUT_MS: u32 = 700;
 const WORKER_START_TIMEOUT: Duration = Duration::from_millis(750);
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(1_250);
@@ -54,13 +56,24 @@ static WORKER: OnceLock<Mutex<Option<NativeUiaWorker>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct NativeUiaWorker {
-    sender: SyncSender<CaptureRequest>,
+    sender: SyncSender<WorkerRequest>,
+}
+
+enum WorkerRequest {
+    Capture(CaptureRequest),
+    Invoke(InvokeRequest),
 }
 
 struct CaptureRequest {
     region: Option<UiContextRect>,
     target_window_handle: Option<isize>,
     response: mpsc::Sender<Result<ScreenContextSnapshot, String>>,
+}
+
+struct InvokeRequest {
+    action: DesktopAction,
+    target_window_handle: isize,
+    response: mpsc::Sender<Result<DesktopActionResult, String>>,
 }
 
 struct NativeCollector {
@@ -86,7 +99,7 @@ pub fn capture(
         response: response_sender,
     };
 
-    match sender.try_send(request) {
+    match sender.try_send(WorkerRequest::Capture(request)) {
         Ok(()) => {}
         Err(TrySendError::Full(_)) => {
             return Err("Native UI Automation is still collecting a previous snapshot.".to_string())
@@ -115,7 +128,57 @@ pub fn capture(
     }
 }
 
-fn worker_sender() -> Result<SyncSender<CaptureRequest>, String> {
+/// The caller has already received an explicit user approval in the renderer.
+/// We nevertheless validate and re-resolve the semantic target here because an
+/// IPC payload must be treated as untrusted input.
+pub fn invoke(
+    action: DesktopAction,
+    target_window_handle: isize,
+) -> Result<DesktopActionResult, String> {
+    validate_desktop_action(&action)?;
+
+    if target_window_handle == 0 {
+        return Err("The screen target is no longer available for this action.".to_string());
+    }
+
+    let sender = worker_sender()?;
+    let (response_sender, response_receiver) = mpsc::channel();
+    let request = InvokeRequest {
+        action,
+        target_window_handle,
+        response: response_sender,
+    };
+
+    match sender.try_send(WorkerRequest::Invoke(request)) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => {
+            return Err(
+                "Waey is still reading the screen. Try the action again in a moment.".to_string(),
+            )
+        }
+        Err(TrySendError::Disconnected(_)) => {
+            reset_worker();
+            return Err("Native UI Automation worker stopped unexpectedly.".to_string());
+        }
+    }
+
+    match response_receiver.recv_timeout(REQUEST_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            reset_worker();
+            Err(format!(
+                "Waey could not verify the target within {} ms.",
+                REQUEST_TIMEOUT.as_millis()
+            ))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            reset_worker();
+            Err("Native UI Automation worker stopped before applying the action.".to_string())
+        }
+    }
+}
+
+fn worker_sender() -> Result<SyncSender<WorkerRequest>, String> {
     let worker = worker_slot();
     let mut current = worker
         .lock()
@@ -161,7 +224,7 @@ impl NativeUiaWorker {
     }
 }
 
-fn run_worker(receiver: Receiver<CaptureRequest>, ready: SyncSender<Result<(), String>>) {
+fn run_worker(receiver: Receiver<WorkerRequest>, ready: SyncSender<Result<(), String>>) {
     if let Err(error) = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok() {
         let _ = ready.send(Err(format!(
             "Unable to initialize the UI Automation apartment: {error}"
@@ -182,8 +245,16 @@ fn run_worker(receiver: Receiver<CaptureRequest>, ready: SyncSender<Result<(), S
     };
 
     while let Ok(request) = receiver.recv() {
-        let result = collector.capture(request.region, request.target_window_handle);
-        let _ = request.response.send(result);
+        match request {
+            WorkerRequest::Capture(request) => {
+                let result = collector.capture(request.region, request.target_window_handle);
+                let _ = request.response.send(result);
+            }
+            WorkerRequest::Invoke(request) => {
+                let result = collector.invoke(request.action, request.target_window_handle);
+                let _ = request.response.send(result);
+            }
+        }
     }
 
     unsafe { CoUninitialize() };
@@ -331,6 +402,80 @@ impl NativeCollector {
                 truncated: elements_truncated,
                 ..Default::default()
             },
+        })
+    }
+
+    fn invoke(
+        &self,
+        action: DesktopAction,
+        target_window_handle: isize,
+    ) -> Result<DesktopActionResult, String> {
+        validate_desktop_action(&action)?;
+
+        let target_window = unsafe {
+            self.automation
+                .ElementFromHandleBuildCache(HWND(target_window_handle), &self.cache_request)
+                .map_err(|error| {
+                    format!("Waey could not access the original target window: {error}")
+                })?
+        };
+        let condition = unsafe {
+            self.automation.ControlViewCondition().map_err(|error| {
+                format!("Waey could not create the UI Automation control view: {error}")
+            })?
+        };
+        let elements = unsafe {
+            target_window
+                .FindAllBuildCache(TreeScope_Descendants, &condition, &self.cache_request)
+                .map_err(|error| format!("Waey could not re-read target controls: {error}"))?
+        };
+        let length = unsafe { elements.Length() }
+            .map_err(|error| format!("Waey could not count target controls: {error}"))?;
+        let mut matches = Vec::new();
+
+        for index in 0..length.min(MAX_ACTION_CANDIDATES) {
+            let Ok(element) = (unsafe { elements.GetElement(index) }) else {
+                continue;
+            };
+            let Some(summary) = self.element_summary(&element, None, 1, false) else {
+                continue;
+            };
+
+            if matches_desktop_action_target(&summary, &action.target) {
+                matches.push(element);
+            }
+        }
+
+        match matches.len() {
+            0 => return Err(
+                "Waey could not verify that the proposed control is still visible and unchanged."
+                    .to_string(),
+            ),
+            1 => {}
+            _ => return Err(
+                "Waey found more than one matching control, so it will not guess where to click."
+                    .to_string(),
+            ),
+        }
+
+        let element = matches.pop().expect("match length was checked");
+        let invoke_pattern = unsafe {
+            element
+                .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
+                .map_err(|_| {
+                    "The verified control does not support a safe invoke action.".to_string()
+                })?
+        };
+        unsafe {
+            invoke_pattern
+                .Invoke()
+                .map_err(|error| format!("Windows rejected the verified action: {error}"))?;
+        }
+
+        Ok(DesktopActionResult {
+            summary: action.summary,
+            target: action.target,
+            verified: true,
         })
     }
 

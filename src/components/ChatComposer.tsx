@@ -5,8 +5,9 @@ import type { DeveloperAccessLevel, StreamState } from "../shared/types";
 interface ChatComposerProps {
   streamState: StreamState;
   onCancelPrompt: () => Promise<void>;
-  onSubmitPrompt: (prompt: string, guideMode: boolean) => Promise<void>;
+  onSubmitPrompt: (prompt: string, guideMode: boolean, actionMode: boolean) => Promise<void>;
   isRtl: boolean;
+  screenContextEnabled: boolean;
   developerModeEnabled: boolean;
   developerAccessLevel: DeveloperAccessLevel;
   developerWorkspaces: string[];
@@ -46,6 +47,7 @@ export function ChatComposer({
   onCancelPrompt,
   onSubmitPrompt,
   isRtl,
+  screenContextEnabled,
   developerModeEnabled,
   developerAccessLevel,
   developerWorkspaces,
@@ -55,6 +57,7 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [prompt, setPrompt] = useState("");
   const [guideMode, setGuideMode] = useState(false);
+  const [actionMode, setActionMode] = useState(false);
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
@@ -75,18 +78,20 @@ export function ChatComposer({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isStreaming || !prompt.trim()) return;
-    await onSubmitPrompt(prompt, guideMode);
+    await onSubmitPrompt(prompt, guideMode, actionMode);
     setPrompt("");
     setGuideMode(false);
+    setActionMode(false);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (!isStreaming && prompt.trim()) {
-        void onSubmitPrompt(prompt, guideMode).then(() => {
+        void onSubmitPrompt(prompt, guideMode, actionMode).then(() => {
           setPrompt("");
           setGuideMode(false);
+          setActionMode(false);
         });
       }
     }
@@ -123,7 +128,10 @@ export function ChatComposer({
         aria-pressed={guideMode}
         className={`guide-mode-trigger ${guideMode ? "guide-mode-trigger--active" : ""}`}
         disabled={isStreaming}
-        onClick={() => setGuideMode((enabled) => !enabled)}
+        onClick={() => {
+          setGuideMode((enabled) => !enabled);
+          setActionMode(false);
+        }}
         title={guideMode
           ? (isRtl ? "الإرشاد خطوة بخطوة مفعّل للطلب القادم" : "Guide the next request step by step")
           : (isRtl ? "فعّل الإرشاد خطوة بخطوة" : "Enable step-by-step guide")}
@@ -134,6 +142,27 @@ export function ChatComposer({
           <path d="M15 9l-2.2 4.2L9 15l2.2-4.2L15 9z" />
         </svg>
         <span>{isRtl ? "إرشاد" : "Guide"}</span>
+      </button>
+      <button
+        aria-pressed={actionMode}
+        className={`guide-mode-trigger action-mode-trigger ${actionMode ? "guide-mode-trigger--active" : ""}`}
+        disabled={isStreaming || !screenContextEnabled}
+        onClick={() => {
+          setActionMode((enabled) => !enabled);
+          setGuideMode(false);
+        }}
+        title={!screenContextEnabled
+          ? (isRtl ? "فعّل سياق الشاشة أولاً" : "Enable screen context first")
+          : actionMode
+            ? (isRtl ? "سيعرض Waey اقتراح فعل للموافقة عليه" : "Waey will propose one action for approval")
+            : (isRtl ? "فعّل اقتراح فعل آمن للطلب القادم" : "Enable a safe action proposal for the next request")}
+        type="button"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M5 12h14" />
+          <path d="M13 6l6 6-6 6" />
+        </svg>
+        <span>{isRtl ? "تنفيذ" : "Act"}</span>
       </button>
       {developerModeEnabled && (
         <div className="dev-access-menu-wrap">

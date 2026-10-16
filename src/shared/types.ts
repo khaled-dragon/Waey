@@ -223,6 +223,29 @@ export interface GuideOverlayRequest {
   isRtl: boolean;
 }
 
+export type DesktopActionKind = "click";
+
+export type DesktopActionRole = "Button" | "MenuItem" | "Hyperlink";
+
+export interface DesktopActionTarget {
+  role: DesktopActionRole;
+  label?: string | null;
+  automationId?: string | null;
+  bounds: CaptureRect;
+}
+
+export interface DesktopAction {
+  kind: DesktopActionKind;
+  summary: string;
+  target: DesktopActionTarget;
+}
+
+export interface DesktopActionResult {
+  summary: string;
+  target: DesktopActionTarget;
+  verified: boolean;
+}
+
 export type ChatMessageRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {

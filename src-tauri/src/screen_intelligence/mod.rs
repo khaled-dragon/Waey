@@ -1,3 +1,4 @@
+mod action;
 mod context_cache;
 mod model;
 mod normalizer;
@@ -5,6 +6,10 @@ mod normalizer;
 mod windows_native_uia;
 mod windows_uia;
 
+pub use action::{
+    matches_desktop_action_target, validate_desktop_action, DesktopAction,
+    DesktopActionExecutionRequest, DesktopActionResult, DesktopActionTarget,
+};
 pub use context_cache::ScreenContextCache;
 pub use model::{
     ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
@@ -12,7 +17,7 @@ pub use model::{
 };
 pub use windows_uia::{
     capture_cursor_position, capture_foreground_window_handle, capture_windows_ui_context,
-    warm_up_windows_ui_automation,
+    execute_desktop_action, warm_up_windows_ui_automation,
 };
 
 use serde::{Deserialize, Serialize};
