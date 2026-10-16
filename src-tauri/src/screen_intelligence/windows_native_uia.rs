@@ -252,7 +252,7 @@ impl NativeCollector {
         target_window_handle: Option<isize>,
     ) -> Result<ScreenContextSnapshot, String> {
         let started_at = Instant::now();
-        let cursor = cursor_position();
+        let cursor = capture_cursor_position();
         let target_handle = target_window_handle
             .filter(|handle| *handle != 0)
             .map(HWND)
@@ -554,7 +554,7 @@ fn cached_rect(element: &IUIAutomationElement) -> Option<UiContextRect> {
     })
 }
 
-fn cursor_position() -> Option<ScreenContextPoint> {
+pub fn capture_cursor_position() -> Option<ScreenContextPoint> {
     let mut point = POINT::default();
     unsafe { GetCursorPos(&mut point).ok()? };
     Some(ScreenContextPoint {

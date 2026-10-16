@@ -31,11 +31,9 @@ function App() {
 
 type Panel = "chat" | "history" | "settings";
 
-const UI_CONTEXT_REUSE_WINDOW_MS = 2_500;
-
 function MainOverlay() {
   useOverlayShortcuts();
-  const { captureError, captures, clearCaptures, latestCapture, latestUiContexts, recordUiContext, removeCapture, setCaptureError } = useScreenCaptureEvents();
+  const { captureError, captures, clearCaptures, latestCapture, recordUiContext, removeCapture, setCaptureError } = useScreenCaptureEvents();
   const [activePanel, setActivePanel] = useState<Panel>("chat");
   const [captureLimitMessage, setCaptureLimitMessage] = useState<string | null>(null);
   const [showClosePrompt, setShowClosePrompt] = useState(false);
@@ -55,12 +53,12 @@ function MainOverlay() {
   const isRtl = settings.language === "ar";
   const isDark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
-  const captureFreshUiContext = useCallback(async (allowClipboardSelection = false) => {
-    if (!allowClipboardSelection && pendingUiContextCapture.current) {
+  const captureFreshUiContext = useCallback(async (allowClipboardSelection = false, forceFresh = false) => {
+    if (!allowClipboardSelection && !forceFresh && pendingUiContextCapture.current) {
       return pendingUiContextCapture.current;
     }
 
-    const capturePromise = captureCurrentUiContext(allowClipboardSelection)
+    const capturePromise = captureCurrentUiContext(allowClipboardSelection, forceFresh)
       .then((context) => {
         if (context) {
           recordUiContext(context);
@@ -70,7 +68,7 @@ function MainOverlay() {
         return context;
       });
 
-    if (!allowClipboardSelection) {
+    if (!allowClipboardSelection && !forceFresh) {
       pendingUiContextCapture.current = capturePromise;
       void capturePromise.finally(() => {
         if (pendingUiContextCapture.current === capturePromise) {
@@ -105,9 +103,6 @@ function MainOverlay() {
     void listen("overlay-opened", () => {
       setActivePanel("chat");
       clearCaptures();
-      if (settings.attachUiContext) {
-        void captureFreshUiContext().catch(() => undefined);
-      }
     }).then((unlisten) => {
       if (!isMounted) {
         unlisten();
@@ -121,7 +116,7 @@ function MainOverlay() {
       isMounted = false;
       removeListener?.();
     };
-  }, [captureFreshUiContext, clearCaptures, settings.attachUiContext]);
+  }, [clearCaptures]);
 
   function clearDeveloperStatuses() {
     setDeveloperContextStatus(null);
@@ -178,25 +173,21 @@ function MainOverlay() {
     await captureCurrentScreen().catch(() => undefined);
   }
 
-  const freshPromptUiContexts = useCallback(async (allowClipboardSelection = false) => {
+  const freshPromptUiContexts = useCallback(async ({
+    allowClipboardSelection = false,
+    forceFresh = false,
+  }: {
+    allowClipboardSelection?: boolean;
+    forceFresh?: boolean;
+  } = {}) => {
     if (!settings.attachUiContext) {
       return [];
-    }
-
-    const latestContext = latestUiContexts
-      .slice()
-      .sort((left, right) => right.capturedAt - left.capturedAt)[0] ?? null;
-
-    if (!allowClipboardSelection
-      && latestContext
-      && Date.now() - latestContext.capturedAt <= UI_CONTEXT_REUSE_WINDOW_MS) {
-      return [latestContext];
     }
 
     let freshContext: UiContextSnapshot | null = null;
 
     try {
-      freshContext = await captureFreshUiContext(allowClipboardSelection);
+      freshContext = await captureFreshUiContext(allowClipboardSelection, forceFresh);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setCaptureError(isRtl
@@ -213,7 +204,7 @@ function MainOverlay() {
       ? "تعذر على Waey قراءة عناصر الشاشة لهذه الرسالة. لن يستخدم لقطة قديمة."
       : "Waey could not read the current screen structure for this message, so it will not use stale context.");
     return [];
-  }, [captureFreshUiContext, isRtl, latestUiContexts, setCaptureError, settings.attachUiContext]);
+  }, [captureFreshUiContext, isRtl, setCaptureError, settings.attachUiContext]);
 
   const continueGuide = useCallback(async (step: GuideStep, onContextCaptured: () => void) => {
     if (!selectedProvider) {
@@ -221,7 +212,7 @@ function MainOverlay() {
     }
 
     clearCaptures();
-    const uiContexts = await freshPromptUiContexts();
+    const uiContexts = await freshPromptUiContexts({ forceFresh: true });
     setGuideUiContext(uiContexts[0] ?? null);
     onContextCaptured();
     const continuationPrompt = `The user confirmed guide step ${step.stepIndex}. Inspect the fresh screen context and provide exactly one next guide step, or complete the guide if the task is finished.`;
@@ -265,7 +256,10 @@ function MainOverlay() {
 
       if (approved) {
         if (shouldOfferClipboardSelection(prompt, uiContexts) && window.confirm("Waey could not read the current selection through UI accessibility. Allow it to briefly copy the selected text? Your clipboard will be restored.")) {
-          uiContexts = await freshPromptUiContexts(true);
+          uiContexts = await freshPromptUiContexts({
+            allowClipboardSelection: true,
+            forceFresh: true,
+          });
         }
 
         const attachment = await buildDeveloperContext({

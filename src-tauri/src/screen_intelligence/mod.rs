@@ -1,15 +1,18 @@
+mod context_cache;
 mod model;
 mod normalizer;
 #[cfg(target_os = "windows")]
 mod windows_native_uia;
 mod windows_uia;
 
+pub use context_cache::ScreenContextCache;
 pub use model::{
     ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
     UiElementSummary, VisibleWindowSummary,
 };
 pub use windows_uia::{
-    capture_foreground_window_handle, capture_windows_ui_context, warm_up_windows_ui_automation,
+    capture_cursor_position, capture_foreground_window_handle, capture_windows_ui_context,
+    warm_up_windows_ui_automation,
 };
 
 use serde::{Deserialize, Serialize};

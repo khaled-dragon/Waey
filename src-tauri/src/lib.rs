@@ -36,7 +36,7 @@ use providers::{
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
 use spreadsheet::apply_developer_spreadsheet_edit;
-use std::sync::Mutex;
+use std::{sync::Mutex, thread};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use ui_context::{capture_ui_context, UiContextSnapshot};
 
@@ -122,13 +122,28 @@ fn capture_selected_region(app: AppHandle, rect: CaptureRect) -> Result<ScreenCa
 fn capture_current_ui_context(
     app: AppHandle,
     allow_clipboard_selection: bool,
+    force_fresh: bool,
 ) -> Result<Option<UiContextSnapshot>, String> {
     if !attach_ui_context(&app) {
         return Ok(None);
     }
 
     let target_window_handle = screen_context_target_handle(&app);
-    let context_result = capture_ui_context(None, allow_clipboard_selection, target_window_handle);
+    let current_cursor = screen_intelligence::capture_cursor_position();
+    let context_cache = app
+        .state::<screen_intelligence::ScreenContextCache>()
+        .inner()
+        .clone();
+    // Clipboard-derived selection is intentionally never served from the
+    // prefetch cache: the user's one-time permission applies only to this
+    // exact request. Guide confirmations also require a new observation.
+    let may_reuse_prefetch = !allow_clipboard_selection && !force_fresh;
+    let context_result = context_cache.capture_or_reuse(
+        target_window_handle,
+        current_cursor,
+        may_reuse_prefetch,
+        || capture_ui_context(None, allow_clipboard_selection, target_window_handle),
+    );
     if let Err(error) = &context_result {
         logger::warn(format!(
             "screen context capture failed for target {:?}: {error}",
@@ -303,6 +318,7 @@ fn window_by_label(app: &AppHandle, label: &str) -> Result<WebviewWindow, String
 
 fn show_overlay(app: &AppHandle) -> Result<(), String> {
     remember_screen_context_target(app);
+    prefetch_screen_context(app);
     app.emit(OVERLAY_OPENED_EVENT, ())
         .map_err(|error| error.to_string())?;
 
@@ -323,6 +339,54 @@ fn show_overlay(app: &AppHandle) -> Result<(), String> {
             emit_capture_error(app, "fullScreen", &error);
             Ok(())
         }
+    }
+}
+
+/// Starts UIA collection while the user is opening Waey, rather than delaying
+/// the first prompt. The prompt path owns the final freshness decision and
+/// surfaces any collection failure; this best-effort task only warms the cache.
+fn prefetch_screen_context(app: &AppHandle) {
+    if !attach_ui_context(app) {
+        return;
+    }
+
+    let target_window_handle = screen_context_target_handle(app);
+    let context_cache = app
+        .state::<screen_intelligence::ScreenContextCache>()
+        .inner()
+        .clone();
+
+    match context_cache.try_begin_capture(target_window_handle) {
+        Ok(true) => {}
+        Ok(false) => {
+            logger::info("screen context prefetch skipped because a collection is already running");
+            return;
+        }
+        Err(error) => {
+            logger::warn(format!("failed to begin screen context prefetch: {error}"));
+            return;
+        }
+    }
+
+    let prefetch_cache = context_cache.clone();
+    let spawn_result = thread::Builder::new()
+        .name("waey-screen-context-prefetch".to_string())
+        .spawn(move || {
+            let result = capture_ui_context(None, false, target_window_handle);
+            if let Err(error) = &result {
+                logger::warn(format!(
+                    "screen context prefetch failed for target {:?}: {error}",
+                    target_window_handle
+                ));
+            }
+            prefetch_cache.finish_capture(target_window_handle, &result);
+        });
+
+    if let Err(error) = spawn_result {
+        let failure: Result<Option<UiContextSnapshot>, String> =
+            Err(format!("Unable to start screen context prefetch: {error}"));
+        context_cache.finish_capture(target_window_handle, &failure);
+        logger::warn(format!("failed to spawn screen context prefetch: {error}"));
     }
 }
 
@@ -557,6 +621,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(LlmRequestRegistry::default())
         .manage(ScreenContextTarget::default())
+        .manage(screen_intelligence::ScreenContextCache::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())

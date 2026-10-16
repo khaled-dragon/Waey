@@ -406,15 +406,16 @@ The work is complete only when all of these are true:
 
 The work ships in five focused Git commits. Each task is pushed after its local checks pass. No release is created until all five are integrated and tested together.
 
-- [ ] **Task 1: Screen Intelligence v2 foundation**
+- [x] **Task 1: Screen Intelligence v2 foundation**
   - Add versioned Rust and TypeScript contracts, feature flags, diagnostics, timing interfaces, and fixture-based unit tests.
   - Preserve the existing UI context behavior behind a compatibility adapter.
-  - Suggested commit: `feat: establish screen intelligence foundation`
+  - Completed in `f99d7cb` with the native persistent Windows UI Automation collector foundation.
 
-- [ ] **Task 2: Windows UIA and prompt context pipeline**
+- [x] **Task 2: Windows UIA and prompt context pipeline**
   - Implement bounded Windows UIA collection, normalization, redaction, compact model serialization, freshness cache, and provider-aware image routing.
   - Ensure screen context reaches every enabled prompt independently from screenshot attachments.
-  - Suggested commit: `feat: add reliable screen context pipeline`
+  - Completed with request-scoped prefetch, a bounded freshness cache, cursor-aware reuse, and forced recapture for guide confirmation and clipboard selection.
+  - Suggested commit: `feat(context): add fresh screen context pipeline`
 
 - [ ] **Task 3: Interactive guide mode**
   - Add the guide state machine, one-step structured protocol, transparent mascot overlay, safe target pointing, Done and Cancel handling, and fresh context recapture after confirmation.

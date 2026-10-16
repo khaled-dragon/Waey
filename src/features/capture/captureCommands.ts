@@ -9,8 +9,11 @@ export function captureSelectedRegion(rect: CaptureRect) {
   return invoke<ScreenCapture>("capture_selected_region", { rect });
 }
 
-export function captureCurrentUiContext(allowClipboardSelection = false) {
-  return invoke<UiContextSnapshot | null>("capture_current_ui_context", { allowClipboardSelection });
+export function captureCurrentUiContext(allowClipboardSelection = false, forceFresh = false) {
+  return invoke<UiContextSnapshot | null>("capture_current_ui_context", {
+    allowClipboardSelection,
+    forceFresh,
+  });
 }
 
 export function showRegionSelector() {

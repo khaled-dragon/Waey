@@ -29,6 +29,18 @@ pub fn capture_foreground_window_handle() -> Option<isize> {
     }
 }
 
+pub fn capture_cursor_position() -> Option<super::ScreenContextPoint> {
+    #[cfg(target_os = "windows")]
+    {
+        return super::windows_native_uia::capture_cursor_position();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 pub fn capture_windows_ui_context(
     region: Option<UiContextRect>,
     allow_clipboard_selection: bool,
