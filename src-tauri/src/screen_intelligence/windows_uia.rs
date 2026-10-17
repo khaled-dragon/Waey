@@ -69,7 +69,9 @@ pub fn capture_windows_ui_context(
                 // apartment is an independent recovery path and is preferable
                 // to dropping the prompt's UI context altogether.
                 return match capture_legacy_windows_ui_context(
-                    region,
+                    // The minimal fallback below still needs this region if
+                    // the legacy collector times out or returns no snapshot.
+                    region.clone(),
                     allow_clipboard_selection,
                     target_window_handle,
                 ) {
