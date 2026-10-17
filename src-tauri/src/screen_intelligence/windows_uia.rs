@@ -1,6 +1,7 @@
 use super::{
-    normalizer::normalize_snapshot, DesktopAction, DesktopActionResult, ScreenContextSnapshot,
-    UiContextRect, SCREEN_CONTEXT_SCHEMA_VERSION,
+    normalizer::normalize_snapshot, DesktopAction, DesktopActionResult,
+    ScreenContextCollectionStatus, ScreenContextCollector, ScreenContextDiagnostics,
+    ScreenContextSnapshot, UiContextRect, SCREEN_CONTEXT_SCHEMA_VERSION,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +9,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const COLLECTION_TIMEOUT: Duration = Duration::from_millis(4_000);
+// The native collector has already spent up to 1250 ms before we reach this
+// fallback. Keep the legacy bridge bounded so a problematic provider cannot
+// turn one prompt into a multi-second UI freeze.
+const LEGACY_FALLBACK_TIMEOUT: Duration = Duration::from_millis(1_900);
 const COLLECTOR_VERSION: &str = "v7";
 
 pub fn capture_foreground_window_handle() -> Option<isize> {
@@ -55,20 +59,49 @@ pub fn capture_windows_ui_context(
         let started_at = Instant::now();
         match super::windows_native_uia::capture(region.clone(), target_window_handle) {
             Ok(snapshot) => return Ok(Some(finalize_snapshot(snapshot, region, started_at))),
-            Err(native_error) if legacy_fallback_enabled() => {
-                crate::logger::warn(format!(
-                    "native UI Automation failed; using explicitly enabled legacy collector: {native_error}"
-                ));
-            }
             Err(native_error) => {
-                return Err(format!(
-                    "Native UI Automation collector failed: {native_error}"
+                crate::logger::warn(format!(
+                    "native UI Automation failed; using bounded legacy fallback: {native_error}"
                 ));
+
+                // Native UIA is the fast path. Some third-party providers can
+                // nevertheless wedge a single COM request. A fresh PowerShell
+                // apartment is an independent recovery path and is preferable
+                // to dropping the prompt's UI context altogether.
+                return match capture_legacy_windows_ui_context(
+                    region,
+                    allow_clipboard_selection,
+                    target_window_handle,
+                ) {
+                    Ok(Some(mut snapshot)) => {
+                        snapshot.diagnostics.warnings.push(format!(
+                            "Native UI Automation was unavailable for this capture; Waey used the bounded legacy collector instead ({native_error})."
+                        ));
+                        Ok(Some(snapshot))
+                    }
+                    Ok(None) => Ok(Some(minimal_windows_snapshot(
+                        region,
+                        target_window_handle,
+                        started_at,
+                        native_error,
+                        "The legacy collector returned no screen snapshot.".to_string(),
+                    ))),
+                    Err(legacy_error) => {
+                        crate::logger::warn(format!(
+                            "legacy UI Automation fallback failed; sending minimal screen identity: {legacy_error}"
+                        ));
+                        Ok(Some(minimal_windows_snapshot(
+                            region,
+                            target_window_handle,
+                            started_at,
+                            native_error,
+                            legacy_error,
+                        )))
+                    }
+                };
             }
         }
     }
-
-    capture_legacy_windows_ui_context(region, allow_clipboard_selection, target_window_handle)
 }
 
 pub fn warm_up_windows_ui_automation() {
@@ -144,15 +177,77 @@ fn finalize_snapshot(
     normalized
 }
 
-fn legacy_fallback_enabled() -> bool {
-    matches!(
-        std::env::var("WAEY_UIA_LEGACY_FALLBACK")
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes"
+fn minimal_windows_snapshot(
+    region: Option<UiContextRect>,
+    target_window_handle: Option<isize>,
+    started_at: Instant,
+    native_error: String,
+    legacy_error: String,
+) -> ScreenContextSnapshot {
+    let window_handle = target_window_handle
+        .filter(|handle| *handle != 0)
+        .or_else(capture_foreground_window_handle);
+    let warning = format!(
+        "Waey could not enumerate the full UI tree for this capture. Native collector: {native_error}. Legacy fallback: {legacy_error}."
+    );
+
+    finalize_snapshot(
+        ScreenContextSnapshot {
+            schema_version: SCREEN_CONTEXT_SCHEMA_VERSION,
+            platform: "windows".to_string(),
+            active_window_title: window_handle
+                .and_then(window_title_from_handle)
+                .or_else(|| Some("Current Windows desktop (window title unavailable)".to_string())),
+            active_app_name: None,
+            selected_text: None,
+            selected_text_source: None,
+            captured_at: timestamp_millis(),
+            region: region.clone(),
+            cursor: capture_cursor_position(),
+            active_window_bounds: None,
+            focused_element: None,
+            pointed_element: None,
+            visible_windows: Vec::new(),
+            elements: Vec::new(),
+            diagnostics: ScreenContextDiagnostics {
+                collector: ScreenContextCollector::NativeUia,
+                status: ScreenContextCollectionStatus::Partial,
+                elapsed_ms: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                element_count: 0,
+                truncated: true,
+                warnings: vec![warning],
+                ..Default::default()
+            },
+        },
+        region,
+        started_at,
     )
+}
+
+fn window_title_from_handle(window_handle: isize) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn GetWindowTextLengthW(hwnd: isize) -> i32;
+            fn GetWindowTextW(hwnd: isize, text: *mut u16, maximum_count: i32) -> i32;
+        }
+
+        let length = GetWindowTextLengthW(window_handle).max(0) as usize;
+        let mut text = vec![0_u16; length.saturating_add(1)];
+        let copied =
+            GetWindowTextW(window_handle, text.as_mut_ptr(), text.len() as i32).max(0) as usize;
+
+        (copied > 0)
+            .then(|| String::from_utf16_lossy(&text[..copied]))
+            .filter(|title| !title.trim().is_empty())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window_handle;
+        None
+    }
 }
 
 fn run_collector(
@@ -174,7 +269,7 @@ fn run_collector(
             &output_path,
             allow_clipboard_selection,
             target_window_handle,
-            COLLECTION_TIMEOUT,
+            LEGACY_FALLBACK_TIMEOUT,
         )?;
 
         let json = fs::read_to_string(&output_path)

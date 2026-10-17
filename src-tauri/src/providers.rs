@@ -8,6 +8,9 @@ use uuid::Uuid;
 
 const WAEY_MANAGED_PROVIDER_ENDPOINT: &str = "https://khaled135-waey-preset.hf.space/waey-provider";
 const WAEY_MANAGED_PROVIDER_ID: &str = "waey-managed-groq";
+const GROQ_OPENAI_BASE_URL: &str = "https://api.groq.com/openai/v1";
+const RETIRED_MANAGED_GROQ_MODEL: &str = "qwen/qwen3.6-27b";
+const CURRENT_MANAGED_GROQ_MODEL: &str = "qwen/qwen3.8-27b";
 const OCTO_INK_DROPS: [u8; 37] = [
     33, 47, 22, 24, 10, 27, 35, 11, 36, 5, 57, 63, 63, 1, 17, 60, 30, 4, 62, 60, 31, 61, 46, 14,
     60, 39, 30, 57, 17, 29, 3, 28, 6, 42, 24, 47, 7,
@@ -147,6 +150,8 @@ pub fn save_provider(app: &AppHandle, draft: ProviderDraft) -> Result<LlmProvide
 }
 
 pub async fn bootstrap_waey_provider(app: AppHandle) -> Result<Option<LlmProvider>, String> {
+    migrate_retired_managed_provider(&app)?;
+
     if managed_provider_exists(&app)? {
         return Ok(None);
     }
@@ -170,6 +175,8 @@ pub async fn bootstrap_waey_provider(app: AppHandle) -> Result<Option<LlmProvide
 pub async fn check_waey_provider_update(
     app: AppHandle,
 ) -> Result<Option<ManagedProviderUpdate>, String> {
+    migrate_retired_managed_provider(&app)?;
+
     let payload = fetch_managed_provider().await?;
     let message = payload.message.clone();
     let revision = payload.revision;
@@ -239,7 +246,7 @@ fn managed_provider_gate_header() -> Result<HeaderValue, String> {
 }
 
 fn managed_provider_from_payload(payload: ManagedProviderPayload) -> LlmProvider {
-    LlmProvider {
+    normalize_managed_provider_runtime(LlmProvider {
         id: normalize_managed_provider_id(payload.id),
         name: payload.name.trim().to_string(),
         kind: payload.kind,
@@ -250,7 +257,50 @@ fn managed_provider_from_payload(payload: ManagedProviderPayload) -> LlmProvider
         supports_vision: payload
             .supports_vision
             .unwrap_or_else(|| inferred_vision_support(&payload.model, payload.managed)),
+    })
+}
+
+fn migrate_retired_managed_provider(app: &AppHandle) -> Result<(), String> {
+    let Some(current) = current_managed_provider(app)? else {
+        return Ok(());
+    };
+    let migrated = normalize_managed_provider_runtime(current.clone());
+
+    if migrated.model != current.model || migrated.supports_vision != current.supports_vision {
+        // Groq removed qwen3.6 on September 14, 2026. This local migration
+        // keeps installed Waey versions functional even before the hosted
+        // preset endpoint has been refreshed on every deployment.
+        logger::info(format!(
+            "migrating managed provider model from {} to {}",
+            current.model, migrated.model
+        ));
+        upsert_managed_provider(app, &migrated)?;
     }
+
+    Ok(())
+}
+
+fn normalize_managed_provider_runtime(mut provider: LlmProvider) -> LlmProvider {
+    let uses_retired_managed_groq_model = provider.managed
+        && provider.id == WAEY_MANAGED_PROVIDER_ID
+        && provider
+            .base_url
+            .trim()
+            .trim_end_matches('/')
+            .eq_ignore_ascii_case(GROQ_OPENAI_BASE_URL)
+        && provider
+            .model
+            .trim()
+            .eq_ignore_ascii_case(RETIRED_MANAGED_GROQ_MODEL);
+
+    if uses_retired_managed_groq_model {
+        provider.model = CURRENT_MANAGED_GROQ_MODEL.to_string();
+        // The successor supports image inputs, so preserve the managed
+        // provider's vision contract while moving existing installations.
+        provider.supports_vision = true;
+    }
+
+    provider
 }
 
 fn managed_provider_exists(app: &AppHandle) -> Result<bool, String> {
@@ -430,5 +480,44 @@ fn bool_to_integer(value: bool) -> i64 {
         1
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_managed_provider_runtime, LlmProvider, ProviderKind};
+
+    fn provider(id: &str, managed: bool, model: &str) -> LlmProvider {
+        LlmProvider {
+            id: id.to_string(),
+            name: "Test provider".to_string(),
+            kind: ProviderKind::Custom,
+            base_url: "https://api.groq.com/openai/v1".to_string(),
+            api_key: "test-key".to_string(),
+            model: model.to_string(),
+            managed,
+            supports_vision: false,
+        }
+    }
+
+    #[test]
+    fn migrates_only_the_retired_managed_groq_model() {
+        let migrated = normalize_managed_provider_runtime(provider(
+            "waey-managed-groq",
+            true,
+            "qwen/qwen3.6-27b",
+        ));
+
+        assert_eq!(migrated.model, "qwen/qwen3.8-27b");
+        assert!(migrated.supports_vision);
+    }
+
+    #[test]
+    fn leaves_custom_provider_models_unchanged() {
+        let unchanged =
+            normalize_managed_provider_runtime(provider("custom-groq", false, "qwen/qwen3.6-27b"));
+
+        assert_eq!(unchanged.model, "qwen/qwen3.6-27b");
+        assert!(!unchanged.supports_vision);
     }
 }

@@ -9,6 +9,7 @@ use super::{
     DesktopScrollDirection, ScreenContextCollector, ScreenContextPoint, ScreenContextSnapshot,
     UiContextRect, UiElementSummary, VisibleWindowSummary,
 };
+use std::collections::VecDeque;
 use std::sync::{
     mpsc::{self, Receiver, SyncSender, TrySendError},
     Mutex, OnceLock,
@@ -48,7 +49,14 @@ use windows::{
     },
 };
 
-const MAX_CONTEXT_ELEMENTS: usize = 420;
+// The model consumes at most 72 controls (28 in Guide Mode), so asking UIA to
+// materialize every descendant of an Electron or Chromium window only adds
+// latency and can make the COM call time out. Walk a bounded, shallow control
+// tree instead and keep the focused and pointed controls separately.
+const MAX_CONTEXT_ELEMENTS: usize = 128;
+const MAX_CONTEXT_SCAN_NODES: usize = 256;
+const MAX_CONTEXT_DEPTH: u16 = 10;
+const CONTEXT_COLLECTION_BUDGET: Duration = Duration::from_millis(700);
 const MAX_VISIBLE_WINDOWS: usize = 12;
 const MAX_ACTION_CANDIDATES: i32 = 750;
 const UIA_TRANSACTION_TIMEOUT_MS: u32 = 700;
@@ -402,7 +410,10 @@ impl NativeCollector {
             active_window_bounds: cached_rect(&active_window),
             focused_element: focused_summary,
             pointed_element: pointed_summary,
-            visible_windows: self.visible_windows()?,
+            // A desktop-wide window listing is useful enrichment, but an
+            // inaccessible third-party window must not invalidate a readable
+            // active-window snapshot.
+            visible_windows: self.visible_windows().unwrap_or_default(),
             elements,
             diagnostics: super::ScreenContextDiagnostics {
                 collector: ScreenContextCollector::NativeUia,
@@ -549,30 +560,58 @@ impl NativeCollector {
         active_window: &IUIAutomationElement,
         cursor: Option<ScreenContextPoint>,
     ) -> Result<(Vec<UiElementSummary>, bool), String> {
-        let condition = unsafe {
-            self.automation.ControlViewCondition().map_err(|error| {
-                format!("Unable to create the UI Automation control view: {error}")
+        let walker = unsafe {
+            self.automation.ControlViewWalker().map_err(|error| {
+                format!("Unable to create the UI Automation control walker: {error}")
             })?
         };
-        let elements = unsafe {
-            active_window
-                .FindAllBuildCache(TreeScope_Descendants, &condition, &self.cache_request)
-                .map_err(|error| format!("Unable to enumerate UI Automation controls: {error}"))?
-        };
-        let length = unsafe { elements.Length() }
-            .map_err(|error| format!("Unable to count UI Automation controls: {error}"))?;
-        let mut summaries = Vec::with_capacity((length.max(0) as usize).min(MAX_CONTEXT_ELEMENTS));
+        let started_at = Instant::now();
+        let mut queue = VecDeque::new();
+        let mut tree_was_truncated = false;
+        enqueue_children(
+            &walker,
+            active_window,
+            &self.cache_request,
+            started_at,
+            1,
+            &mut queue,
+            &mut tree_was_truncated,
+        );
 
-        let is_truncated = length > MAX_CONTEXT_ELEMENTS as i32;
-        for index in 0..length.min(MAX_CONTEXT_ELEMENTS as i32) {
-            let Ok(element) = (unsafe { elements.GetElement(index) }) else {
-                continue;
-            };
-            if let Some(summary) = self.element_summary(&element, cursor.clone(), 1, false) {
+        let mut summaries = Vec::with_capacity(MAX_CONTEXT_ELEMENTS);
+        let mut scanned_nodes = 0;
+        let mut is_truncated = tree_was_truncated;
+
+        while let Some((element, depth)) = queue.pop_front() {
+            if scanned_nodes >= MAX_CONTEXT_SCAN_NODES
+                || summaries.len() >= MAX_CONTEXT_ELEMENTS
+                || started_at.elapsed() >= CONTEXT_COLLECTION_BUDGET
+            {
+                is_truncated = true;
+                break;
+            }
+
+            scanned_nodes += 1;
+            if let Some(summary) = self.element_summary(&element, cursor.clone(), depth, false) {
                 summaries.push(summary);
+            }
+
+            if depth < MAX_CONTEXT_DEPTH {
+                enqueue_children(
+                    &walker,
+                    &element,
+                    &self.cache_request,
+                    started_at,
+                    depth.saturating_add(1),
+                    &mut queue,
+                    &mut is_truncated,
+                );
+            } else {
+                is_truncated = true;
             }
         }
 
+        is_truncated |= !queue.is_empty();
         Ok((summaries, is_truncated))
     }
 
@@ -686,6 +725,43 @@ impl NativeCollector {
             child_count: 0,
             parent_trail: Vec::new(),
         })
+    }
+}
+
+fn enqueue_children(
+    walker: &windows::Win32::UI::Accessibility::IUIAutomationTreeWalker,
+    parent: &IUIAutomationElement,
+    cache_request: &IUIAutomationCacheRequest,
+    started_at: Instant,
+    depth: u16,
+    queue: &mut VecDeque<(IUIAutomationElement, u16)>,
+    is_truncated: &mut bool,
+) {
+    if started_at.elapsed() >= CONTEXT_COLLECTION_BUDGET {
+        *is_truncated = true;
+        return;
+    }
+
+    let mut child = unsafe {
+        walker
+            .GetFirstChildElementBuildCache(parent, cache_request)
+            .ok()
+    };
+
+    while let Some(element) = child {
+        if queue.len() >= MAX_CONTEXT_SCAN_NODES
+            || started_at.elapsed() >= CONTEXT_COLLECTION_BUDGET
+        {
+            *is_truncated = true;
+            return;
+        }
+
+        child = unsafe {
+            walker
+                .GetNextSiblingElementBuildCache(&element, cache_request)
+                .ok()
+        };
+        queue.push_back((element, depth));
     }
 }
 

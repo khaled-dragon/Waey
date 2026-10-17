@@ -139,7 +139,7 @@ async fn stream_openai_compatible_response(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
 
-        return Err(format!("Provider returned {status}: {body}"));
+        return Err(provider_failure_message(status, &body, &request.provider));
     }
 
     let registry = request_registry(app);
@@ -167,6 +167,25 @@ async fn stream_openai_compatible_response(
     }
 
     Ok(StreamCompletion::Done(None))
+}
+
+fn provider_failure_message(
+    status: reqwest::StatusCode,
+    body: &str,
+    provider: &LlmProvider,
+) -> String {
+    let uses_retired_groq_model = provider.base_url.contains("api.groq.com")
+        && provider
+            .model
+            .trim()
+            .eq_ignore_ascii_case("qwen/qwen3.6-27b");
+
+    if status == reqwest::StatusCode::NOT_FOUND && uses_retired_groq_model {
+        return "The selected Groq model qwen/qwen3.6-27b was retired. Restart Waey to migrate its managed preset, or update this custom provider to qwen/qwen3.8-27b in Settings."
+            .to_string();
+    }
+
+    format!("Provider returned {status}: {body}")
 }
 
 fn request_registry(app: &AppHandle) -> tauri::State<'_, LlmRequestRegistry> {
@@ -850,7 +869,9 @@ fn history_role_to_string(role: &LlmHistoryRole) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{prompt_with_ui_context, user_message_content, LlmChatRequest};
+    use super::{
+        prompt_with_ui_context, provider_failure_message, user_message_content, LlmChatRequest,
+    };
     use crate::{
         providers::{LlmProvider, ProviderKind},
         screen_intelligence::{
@@ -946,5 +967,21 @@ mod tests {
             user_message_content(&request(false)).expect("text-only request should not read image");
 
         assert!(content.is_string());
+    }
+
+    #[test]
+    fn retired_groq_model_error_explains_the_required_migration() {
+        let mut retired_provider = provider(false);
+        retired_provider.base_url = "https://api.groq.com/openai/v1".to_string();
+        retired_provider.model = "qwen/qwen3.6-27b".to_string();
+
+        let message = provider_failure_message(
+            reqwest::StatusCode::NOT_FOUND,
+            "model_not_found",
+            &retired_provider,
+        );
+
+        assert!(message.contains("retired"));
+        assert!(message.contains("qwen/qwen3.8-27b"));
     }
 }
