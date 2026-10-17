@@ -57,6 +57,11 @@ const REQUEST_TIMEOUT: Duration = Duration::from_millis(1_250);
 
 static WORKER: OnceLock<Mutex<Option<NativeUiaWorker>>> = OnceLock::new();
 
+fn hwnd_from_raw_handle(handle: isize) -> HWND {
+    // UIA keeps window handles as integers; windows-rs binds HWND as a native pointer.
+    HWND(handle as _)
+}
+
 #[derive(Clone)]
 struct NativeUiaWorker {
     sender: SyncSender<WorkerRequest>,
@@ -329,7 +334,7 @@ impl NativeCollector {
         let cursor = capture_cursor_position();
         let target_handle = target_window_handle
             .filter(|handle| *handle != 0)
-            .map(HWND)
+            .map(hwnd_from_raw_handle)
             .unwrap_or_else(|| unsafe { GetForegroundWindow() });
 
         let active_window = unsafe {
@@ -417,7 +422,10 @@ impl NativeCollector {
 
         let target_window = unsafe {
             self.automation
-                .ElementFromHandleBuildCache(HWND(target_window_handle), &self.cache_request)
+                .ElementFromHandleBuildCache(
+                    hwnd_from_raw_handle(target_window_handle),
+                    &self.cache_request,
+                )
                 .map_err(|error| {
                     format!("Waey could not access the original target window: {error}")
                 })?
