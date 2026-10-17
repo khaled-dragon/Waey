@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { DeveloperAccessLevel, StreamState } from "../shared/types";
+import type { DeveloperAccessLevel, LlmProvider, StreamState } from "../shared/types";
 
 interface ChatComposerProps {
   streamState: StreamState;
   onCancelPrompt: () => Promise<void>;
   onSubmitPrompt: (prompt: string, guideMode: boolean, actionMode: boolean) => Promise<void>;
   isRtl: boolean;
+  captureCount: number;
+  captureLimitMessage: string | null;
+  providers: LlmProvider[];
+  selectedProviderId: string;
   screenContextEnabled: boolean;
   developerModeEnabled: boolean;
   developerAccessLevel: DeveloperAccessLevel;
   developerWorkspaces: string[];
+  onAttachScreenCapture: () => Promise<void>;
+  onSelectProvider: (providerId: string) => void;
   onChangeDeveloperAccessLevel: (accessLevel: DeveloperAccessLevel) => void;
   onChangeDeveloperWorkspaces: (workspaces: string[]) => Promise<void>;
   focusPromptKey: number;
@@ -47,10 +53,16 @@ export function ChatComposer({
   onCancelPrompt,
   onSubmitPrompt,
   isRtl,
+  captureCount,
+  captureLimitMessage,
+  providers,
+  selectedProviderId,
   screenContextEnabled,
   developerModeEnabled,
   developerAccessLevel,
   developerWorkspaces,
+  onAttachScreenCapture,
+  onSelectProvider,
   onChangeDeveloperAccessLevel,
   onChangeDeveloperWorkspaces,
   focusPromptKey,
@@ -124,123 +136,6 @@ export function ChatComposer({
 
   return (
     <form className="chat-composer" onSubmit={handleSubmit}>
-      <button
-        aria-pressed={guideMode}
-        className={`guide-mode-trigger ${guideMode ? "guide-mode-trigger--active" : ""}`}
-        disabled={isStreaming}
-        onClick={() => {
-          setGuideMode((enabled) => !enabled);
-          setActionMode(false);
-        }}
-        title={guideMode
-          ? (isRtl ? "الإرشاد خطوة بخطوة مفعّل للطلب القادم" : "Guide the next request step by step")
-          : (isRtl ? "فعّل الإرشاد خطوة بخطوة" : "Enable step-by-step guide")}
-        type="button"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M15 9l-2.2 4.2L9 15l2.2-4.2L15 9z" />
-        </svg>
-        <span>{isRtl ? "إرشاد" : "Guide"}</span>
-      </button>
-      <button
-        aria-pressed={actionMode}
-        className={`guide-mode-trigger action-mode-trigger ${actionMode ? "guide-mode-trigger--active" : ""}`}
-        disabled={isStreaming || !screenContextEnabled}
-        onClick={() => {
-          setActionMode((enabled) => !enabled);
-          setGuideMode(false);
-        }}
-        title={!screenContextEnabled
-          ? (isRtl ? "فعّل سياق الشاشة أولاً" : "Enable screen context first")
-          : actionMode
-            ? (isRtl ? "سيعرض Waey اقتراح فعل للموافقة عليه" : "Waey will propose one action for approval")
-            : (isRtl ? "فعّل اقتراح فعل آمن للطلب القادم" : "Enable a safe action proposal for the next request")}
-        type="button"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M5 12h14" />
-          <path d="M13 6l6 6-6 6" />
-        </svg>
-        <span>{isRtl ? "تنفيذ" : "Act"}</span>
-      </button>
-      {developerModeEnabled && (
-        <div className="dev-access-menu-wrap">
-          <button
-            className="dev-workspace-button"
-            onClick={() => void selectDeveloperWorkspace()}
-            title={activeWorkspace ?? "Add local workspace"}
-            type="button"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
-              <path d="M3 6v12a2 2 0 0 0 2 2" />
-            </svg>
-            <span>{activeWorkspace ? compactWorkspaceName(activeWorkspace) : (isRtl ? "إضافة مساحة" : "Add local space")}</span>
-          </button>
-          {developerWorkspaces.length > 0 && (
-            <button
-              className="dev-workspace-caret"
-              onClick={() => setWorkspaceMenuOpen((isOpen) => !isOpen)}
-              title="Workspace options"
-              type="button"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-          )}
-          <button
-            className="dev-access-trigger"
-            onClick={() => setAccessMenuOpen((isOpen) => !isOpen)}
-            type="button"
-          >
-            <span className="dev-access-icon" aria-hidden="true">{activeAccess.icon}</span>
-            <span>{activeAccess.label}</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
-          {workspaceMenuOpen && (
-            <div className="dev-workspace-menu" role="menu">
-              <div className="dev-access-menu-title">Local workspaces</div>
-              {developerWorkspaces.map((workspace) => (
-                <div className="dev-workspace-option" key={workspace}>
-                  <button onClick={() => void onChangeDeveloperWorkspaces([...developerWorkspaces.filter((item) => item !== workspace), workspace])} title={workspace} type="button">
-                    <span>{compactWorkspaceName(workspace)}</span>
-                    <small>{workspace}</small>
-                  </button>
-                  <button className="dev-workspace-remove" onClick={() => void removeDeveloperWorkspace(workspace)} title="Remove workspace" type="button">x</button>
-                </div>
-              ))}
-              <button className="dev-workspace-add" onClick={() => void selectDeveloperWorkspace()} type="button">Add another workspace</button>
-            </div>
-          )}
-          {accessMenuOpen && (
-            <div className="dev-access-menu" role="menu">
-              <div className="dev-access-menu-title">How should Waey handle code actions?</div>
-              {accessOptions.map((option) => (
-                <button
-                  className={`dev-access-option ${developerAccessLevel === option.id ? "dev-access-option--active" : ""}`}
-                  key={option.id}
-                  onClick={() => {
-                    onChangeDeveloperAccessLevel(option.id);
-                    setAccessMenuOpen(false);
-                  }}
-                  type="button"
-                >
-                  <span className="dev-access-option-icon">{option.icon}</span>
-                  <span className="dev-access-option-copy">
-                    <span>{option.label}</span>
-                    <small>{option.description}</small>
-                  </span>
-                  {developerAccessLevel === option.id && <span className="dev-access-check">OK</span>}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
       <textarea
         className="composer-textarea"
         onChange={(e) => setPrompt(e.currentTarget.value)}
@@ -251,19 +146,179 @@ export function ChatComposer({
         ref={promptInputRef}
         dir={isRtl ? "rtl" : "ltr"}
       />
-      {isStreaming ? (
-        <button className="composer-send composer-stop" onClick={() => void onCancelPrompt()} title={isRtl ? "إيقاف الرد" : "Stop response"} type="button">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
-          </svg>
-        </button>
-      ) : (
-        <button className="composer-send" disabled={!prompt.trim()} type="submit">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 19V5" /><path d="M5 12l7-7 7 7" />
-          </svg>
-        </button>
-      )}
+
+      <div className="composer-controls">
+        <div className="composer-primary-actions">
+          <button
+            className="composer-tool-button"
+            onClick={() => void onAttachScreenCapture()}
+            title={isRtl ? "إرفاق لقطة شاشة" : "Attach screenshot"}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            <span>{isRtl ? "لقطة" : "Capture"}</span>
+            <small>{captureCount}/3</small>
+          </button>
+          <button
+            aria-pressed={guideMode}
+            className={`guide-mode-trigger ${guideMode ? "guide-mode-trigger--active" : ""}`}
+            disabled={isStreaming}
+            onClick={() => {
+              setGuideMode((enabled) => !enabled);
+              setActionMode(false);
+            }}
+            title={guideMode
+              ? (isRtl ? "الإرشاد خطوة بخطوة مفعّل للطلب القادم" : "Guide the next request step by step")
+              : (isRtl ? "فعّل الإرشاد خطوة بخطوة" : "Enable step-by-step guide")}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M15 9l-2.2 4.2L9 15l2.2-4.2L15 9z" />
+            </svg>
+            <span>{isRtl ? "إرشاد" : "Guide"}</span>
+          </button>
+          <button
+            aria-pressed={actionMode}
+            className={`guide-mode-trigger action-mode-trigger ${actionMode ? "guide-mode-trigger--active" : ""}`}
+            disabled={isStreaming || !screenContextEnabled}
+            onClick={() => {
+              setActionMode((enabled) => !enabled);
+              setGuideMode(false);
+            }}
+            title={!screenContextEnabled
+              ? (isRtl ? "فعّل سياق الشاشة أولاً" : "Enable screen context first")
+              : actionMode
+                ? (isRtl ? "سيعرض Waey اقتراح فعل للموافقة عليه" : "Waey will propose one action for approval")
+                : (isRtl ? "فعّل اقتراح فعل آمن للطلب القادم" : "Enable a safe action proposal for the next request")}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12h14" />
+              <path d="M13 6l6 6-6 6" />
+            </svg>
+            <span>{isRtl ? "تنفيذ" : "Act"}</span>
+          </button>
+        </div>
+
+        {developerModeEnabled && (
+          <div className="composer-developer-controls">
+            <div className="dev-access-menu-wrap">
+              <button
+                className="dev-workspace-button"
+                onClick={() => void selectDeveloperWorkspace()}
+                title={activeWorkspace ?? "Add local workspace"}
+                type="button"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
+                  <path d="M3 6v12a2 2 0 0 0 2 2" />
+                </svg>
+                <span>{activeWorkspace ? compactWorkspaceName(activeWorkspace) : (isRtl ? "إضافة مساحة" : "Add local space")}</span>
+              </button>
+              {developerWorkspaces.length > 0 && (
+                <button
+                  className="dev-workspace-caret"
+                  onClick={() => setWorkspaceMenuOpen((isOpen) => !isOpen)}
+                  title="Workspace options"
+                  type="button"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+              )}
+              <button
+                className="dev-access-trigger"
+                onClick={() => setAccessMenuOpen((isOpen) => !isOpen)}
+                type="button"
+              >
+                <span className="dev-access-icon" aria-hidden="true">{activeAccess.icon}</span>
+                <span>{activeAccess.label}</span>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              {workspaceMenuOpen && (
+                <div className="dev-workspace-menu" role="menu">
+                  <div className="dev-access-menu-title">Local workspaces</div>
+                  {developerWorkspaces.map((workspace) => (
+                    <div className="dev-workspace-option" key={workspace}>
+                      <button onClick={() => void onChangeDeveloperWorkspaces([...developerWorkspaces.filter((item) => item !== workspace), workspace])} title={workspace} type="button">
+                        <span>{compactWorkspaceName(workspace)}</span>
+                        <small>{workspace}</small>
+                      </button>
+                      <button className="dev-workspace-remove" onClick={() => void removeDeveloperWorkspace(workspace)} title="Remove workspace" type="button">x</button>
+                    </div>
+                  ))}
+                  <button className="dev-workspace-add" onClick={() => void selectDeveloperWorkspace()} type="button">Add another workspace</button>
+                </div>
+              )}
+              {accessMenuOpen && (
+                <div className="dev-access-menu" role="menu">
+                  <div className="dev-access-menu-title">How should Waey handle code actions?</div>
+                  {accessOptions.map((option) => (
+                    <button
+                      className={`dev-access-option ${developerAccessLevel === option.id ? "dev-access-option--active" : ""}`}
+                      key={option.id}
+                      onClick={() => {
+                        onChangeDeveloperAccessLevel(option.id);
+                        setAccessMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <span className="dev-access-option-icon">{option.icon}</span>
+                      <span className="dev-access-option-copy">
+                        <span>{option.label}</span>
+                        <small>{option.description}</small>
+                      </span>
+                      {developerAccessLevel === option.id && <span className="dev-access-check">OK</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="composer-submit-control">
+          <select
+            aria-label={isRtl ? "اختيار الموديل" : "Select model"}
+            className="composer-model-select"
+            disabled={providers.length === 0}
+            onChange={(event) => onSelectProvider(event.currentTarget.value)}
+            title={isRtl ? "اختيار الموديل" : "Select model"}
+            value={selectedProviderId}
+          >
+            {providers.length === 0 ? (
+              <option value="">{isRtl ? "لا يوجد موديل" : "No model"}</option>
+            ) : (
+              providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name} · {provider.model}
+                </option>
+              ))
+            )}
+          </select>
+          {isStreaming ? (
+            <button className="composer-send composer-stop" onClick={() => void onCancelPrompt()} title={isRtl ? "إيقاف الرد" : "Stop response"} type="button">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button className="composer-send" disabled={!prompt.trim()} type="submit">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5" /><path d="M5 12l7-7 7 7" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+      {captureLimitMessage && <div className="composer-capture-toast" role="status">{captureLimitMessage}</div>}
     </form>
   );
 }

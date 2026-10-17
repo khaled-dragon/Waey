@@ -478,19 +478,7 @@ function MainOverlay() {
         </div>
       </div>
 
-      <div className="toolbar">
-        <button className="screenshot-btn" onClick={() => void attachScreenCapture()} type="button">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-          <span>{captures.length > 0 ? (isRtl ? "إضافة لقطة شاشة" : "Add Screenshot") : (isRtl ? "إرفاق لقطة شاشة" : "Attach Screenshot")}</span>
-          <span className="screenshot-count">{captures.length}/3</span>
-        </button>
-        {captureLimitMessage && <div className="capture-toast">{captureLimitMessage}</div>}
-      </div>
-
-      <div className="app-body">
+      <div className={`app-body ${activePanel === "settings" ? "app-body--settings" : ""}`}>
         <nav className="sidebar-nav">
           <button className={`nav-item ${activePanel === "chat" ? "nav-item--active" : ""}`} onClick={() => setActivePanel("chat")} title={isRtl ? "المحادثة" : "Chat"}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
@@ -503,7 +491,7 @@ function MainOverlay() {
           </button>
         </nav>
 
-        <main className="main-content">
+        <main className={`main-content ${activePanel === "settings" ? "" : "main-content--inset"}`}>
           {activePanel === "history" ? (
             <ConversationHistoryPanel
               activeConversationId={activeConversationId}
@@ -565,6 +553,12 @@ function MainOverlay() {
                 focusPromptKey={guideComposerFocusKey}
                 streamState={streamState}
                 isRtl={isRtl}
+                captureCount={captures.length}
+                captureLimitMessage={captureLimitMessage}
+                onAttachScreenCapture={attachScreenCapture}
+                providers={providers}
+                selectedProviderId={selectedProviderId}
+                onSelectProvider={selectProvider}
                 screenContextEnabled={settings.attachUiContext}
                 developerModeEnabled={settings.developerModeEnabled}
                 developerAccessLevel={settings.developerAccessLevel}
