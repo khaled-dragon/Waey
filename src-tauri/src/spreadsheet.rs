@@ -172,15 +172,11 @@ pub fn summarize_workbook(path: &Path) -> Result<String, String> {
         "Supported actions: addSheet, setCell, setFormula, appendRow, clearCell.".to_string(),
     ];
 
-    for sheet in workbook
-        .get_sheet_collection()
-        .iter()
-        .take(MAX_SUMMARY_SHEETS)
-    {
+    for sheet in workbook.sheet_collection().iter().take(MAX_SUMMARY_SHEETS) {
         let (max_column, max_row) = sheet.highest_column_and_row();
         lines.push(format!(
             "\nSheet `{}`: {} rows x {} columns",
-            sheet.get_name(),
+            sheet.name(),
             max_row,
             max_column
         ));

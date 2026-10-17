@@ -9,8 +9,7 @@ mod windows_uia;
 
 pub use action::{
     matches_desktop_action_target, validate_desktop_action, DesktopAction,
-    DesktopActionExecutionRequest, DesktopActionKind, DesktopActionResult, DesktopActionTarget,
-    DesktopScrollDirection,
+    DesktopActionExecutionRequest, DesktopActionKind, DesktopActionResult, DesktopScrollDirection,
 };
 pub use action_audit::{record_desktop_action_outcome, DesktopActionAuditOutcome};
 pub use context_cache::ScreenContextCache;

@@ -452,7 +452,7 @@ impl NativeCollector {
                 continue;
             };
 
-            if matches_desktop_action_target(&summary, &action.target) {
+            if matches_desktop_action_target(&summary, action.target()) {
                 matches.push(element);
             }
         }
@@ -568,7 +568,7 @@ impl NativeCollector {
             let Ok(element) = (unsafe { elements.GetElement(index) }) else {
                 continue;
             };
-            if let Some(summary) = self.element_summary(&element, cursor, 1, false) {
+            if let Some(summary) = self.element_summary(&element, cursor.clone(), 1, false) {
                 summaries.push(summary);
             }
         }

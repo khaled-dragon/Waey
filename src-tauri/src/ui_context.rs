@@ -1,6 +1,5 @@
 pub use crate::screen_intelligence::{
-    ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot as UiContextSnapshot,
-    UiContextRect, UiElementSummary, VisibleWindowSummary,
+    ScreenContextSnapshot as UiContextSnapshot, UiContextRect, UiElementSummary,
 };
 
 pub fn capture_ui_context(
