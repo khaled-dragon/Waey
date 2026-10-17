@@ -13,9 +13,9 @@
 - [x] Task 1: Add the native in-process UI Automation collector and retain the hidden PowerShell collector only as an explicit fallback. Commit: `f99d7cb`.
 - [x] Task 2: Add request-scoped context prefetch and a short-lived, target-aware freshness cache. Commit: `c77e5f5`.
 - [x] Task 3: Add user-approved semantic desktop action proposals with native UIA revalidation before `Invoke`.
-- [ ] Task 4: Add broader computer-use capabilities behind separate capability grants, explicit previews, and audit-safe outcomes.
+- [x] Task 4: Add broader computer-use capabilities behind separate capability grants, explicit previews, and audit-safe outcomes.
 
-Task 3 deliberately supports only a verified `click` on a unique, visible, enabled `Button`, `MenuItem`, or `Hyperlink`. It never accepts coordinates, keyboard input, a shell command, a URL, or a filesystem operation. The model emits a proposal marker; the user must press Apply; then the native UIA worker resolves role, label or automation id, and bounds against the original target window before invoking it. Sensitive or destructive labels are blocked locally.
+The interaction layer remains deliberately narrow: verified clicks are available by default, while verified text entry and small in-view scrolls require separate capability grants in Settings. It never accepts coordinates, keyboard input, a shell command, a URL, or a filesystem operation. The model emits one proposal marker; the user must press Apply; then the native UIA worker resolves role, label or automation id, and bounds against the original target window before using an invoke, value, or scroll pattern. Sensitive or destructive labels, password controls, and likely secret text are blocked locally. The audit table records fixed outcome codes only, never screen labels or entered text.
 
 ## Purpose
 

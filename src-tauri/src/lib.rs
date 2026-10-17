@@ -33,7 +33,10 @@ use providers::{
     delete_provider, list_providers, save_provider, LlmProvider, ManagedProviderUpdate,
     ProviderDraft,
 };
-use screen_intelligence::{DesktopActionExecutionRequest, DesktopActionResult};
+use screen_intelligence::{
+    record_desktop_action_outcome, DesktopActionAuditOutcome, DesktopActionExecutionRequest,
+    DesktopActionKind, DesktopActionResult,
+};
 use serde::Serialize;
 use settings::{get_settings, save_settings, AppSettings};
 use spreadsheet::apply_developer_spreadsheet_edit;
@@ -163,18 +166,60 @@ async fn execute_desktop_action(
     app: AppHandle,
     request: DesktopActionExecutionRequest,
 ) -> Result<DesktopActionResult, String> {
+    let action_kind = request.action.kind();
     if !request.approved {
+        audit_desktop_action(
+            &app,
+            action_kind,
+            DesktopActionAuditOutcome::Blocked,
+            "approval_required",
+        );
         return Err("Desktop actions require a direct approval in Waey.".to_string());
     }
 
-    if !attach_ui_context(&app) {
+    let settings = get_settings(&app)?;
+    if !settings.attach_ui_context {
+        audit_desktop_action(
+            &app,
+            action_kind,
+            DesktopActionAuditOutcome::Blocked,
+            "screen_context_disabled",
+        );
         return Err("Enable screen context before applying a verified desktop action.".to_string());
     }
 
-    screen_intelligence::validate_desktop_action(&request.action)?;
+    if let Some(capability) = request.action.required_capability() {
+        if !settings.desktop_action_capabilities.contains(&capability) {
+            audit_desktop_action(
+                &app,
+                action_kind,
+                DesktopActionAuditOutcome::Blocked,
+                "capability_not_granted",
+            );
+            return Err(
+                "Enable this desktop capability in Settings before applying it.".to_string(),
+            );
+        }
+    }
+
+    if let Err(error) = screen_intelligence::validate_desktop_action(&request.action) {
+        audit_desktop_action(
+            &app,
+            action_kind,
+            DesktopActionAuditOutcome::Blocked,
+            "invalid_action_payload",
+        );
+        return Err(error);
+    }
     let target_window_handle = screen_context_target_handle(&app)
         .filter(|handle| *handle != 0)
         .ok_or_else(|| {
+            audit_desktop_action(
+                &app,
+                action_kind,
+                DesktopActionAuditOutcome::Blocked,
+                "missing_target_window",
+            );
             "Open Waey from the app you want to control, then request the action again.".to_string()
         })?;
 
@@ -184,17 +229,61 @@ async fn execute_desktop_action(
     let result = tauri::async_runtime::spawn_blocking(move || {
         screen_intelligence::execute_desktop_action(action, Some(target_window_handle))
     })
-    .await
-    .map_err(|error| format!("Desktop action worker ended unexpectedly: {error}"));
+    .await;
 
     if let Err(error) = restore_main_window(&app) {
         logger::error(format!(
             "failed to restore Waey after desktop action: {error}"
         ));
+        audit_desktop_action(
+            &app,
+            action_kind,
+            DesktopActionAuditOutcome::Failed,
+            "overlay_restore_failed",
+        );
         return Err(error);
     }
 
-    Ok(result??)
+    match result {
+        Ok(Ok(result)) => {
+            audit_desktop_action(
+                &app,
+                action_kind,
+                DesktopActionAuditOutcome::Applied,
+                "verified_execution",
+            );
+            Ok(result)
+        }
+        Ok(Err(error)) => {
+            audit_desktop_action(
+                &app,
+                action_kind,
+                DesktopActionAuditOutcome::Failed,
+                "uia_execution_rejected",
+            );
+            Err(error)
+        }
+        Err(error) => {
+            audit_desktop_action(
+                &app,
+                action_kind,
+                DesktopActionAuditOutcome::Failed,
+                "action_worker_unavailable",
+            );
+            Err(format!("Desktop action worker ended unexpectedly: {error}"))
+        }
+    }
+}
+
+fn audit_desktop_action(
+    app: &AppHandle,
+    action_kind: DesktopActionKind,
+    outcome: DesktopActionAuditOutcome,
+    reason_code: &'static str,
+) {
+    if let Err(error) = record_desktop_action_outcome(app, action_kind, outcome, reason_code) {
+        logger::warn(format!("desktop action audit write failed: {error}"));
+    }
 }
 
 #[tauri::command]

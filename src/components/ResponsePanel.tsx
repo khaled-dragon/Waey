@@ -242,6 +242,7 @@ function DesktopActionProposal({ action, isRtl, onExecute }: DesktopActionPropos
 
   const proposedAction = action;
   const targetName = proposedAction.target.label ?? proposedAction.target.automationId ?? (isRtl ? "العنصر المحدد" : "the verified control");
+  const actionDescription = desktopActionDescription(proposedAction, targetName, isRtl);
 
   async function applyAction() {
     setState("running");
@@ -261,7 +262,13 @@ function DesktopActionProposal({ action, isRtl, onExecute }: DesktopActionPropos
       <div className="desktop-action-proposal-copy">
         <strong>{state === "applied" ? (isRtl ? "تم تنفيذ الفعل المتحقق" : "Verified action applied") : (isRtl ? "فعل مقترح" : "Proposed action")}</strong>
         <span>{proposedAction.summary}</span>
-        <small>{isRtl ? `سينقر Waey على ${proposedAction.target.role}: ${targetName}` : `Waey will click ${proposedAction.target.role}: ${targetName}`}</small>
+        <small>{actionDescription}</small>
+        {proposedAction.kind === "setText" && (
+          <div className="desktop-action-text-preview">
+            <span>{isRtl ? "النص الذي سيتم إدخاله" : "Text that will be entered"}</span>
+            <pre>{proposedAction.text}</pre>
+          </div>
+        )}
       </div>
       {state === "applied" ? (
         <div className="desktop-action-result">{isRtl ? "تمت المطابقة والتنفيذ." : "Target re-verified and invoked."}</div>
@@ -278,6 +285,23 @@ function DesktopActionProposal({ action, isRtl, onExecute }: DesktopActionPropos
       {error && <div className="desktop-action-error">{error}</div>}
     </section>
   );
+}
+
+function desktopActionDescription(action: DesktopAction, targetName: string, isRtl: boolean) {
+  switch (action.kind) {
+    case "click":
+      return isRtl
+        ? `سينقر Waey على ${action.target.role}: ${targetName}`
+        : `Waey will click ${action.target.role}: ${targetName}`;
+    case "setText":
+      return isRtl
+        ? `سيدخل Waey النص الظاهر أدناه في ${action.target.role}: ${targetName}`
+        : `Waey will enter the text below in ${action.target.role}: ${targetName}`;
+    case "scroll":
+      return isRtl
+        ? `سيمرر Waey ${action.direction === "down" ? "لأسفل" : "لأعلى"} داخل ${action.target.role}: ${targetName}`
+        : `Waey will scroll ${action.direction} in ${action.target.role}: ${targetName}`;
+  }
 }
 
 function formatDuration(durationMs: number) {

@@ -56,6 +56,7 @@ export interface AppSettings {
   language: "en" | "ar";
   autoCaptureOnOverlay: boolean;
   attachUiContext: boolean;
+  desktopActionCapabilities: DesktopActionCapability[];
   launchOnStartup: boolean;
   selectedProviderId?: string;
   selectedPersonaId?: string;
@@ -65,6 +66,8 @@ export interface AppSettings {
 }
 
 export type DeveloperAccessLevel = "ask" | "assist" | "auto";
+
+export type DesktopActionCapability = "textEntry" | "screenNavigation";
 
 export interface DeveloperContextResponse {
   content: string;
@@ -223,9 +226,18 @@ export interface GuideOverlayRequest {
   isRtl: boolean;
 }
 
-export type DesktopActionKind = "click";
+export type DesktopActionKind = "click" | "setText" | "scroll";
 
-export type DesktopActionRole = "Button" | "MenuItem" | "Hyperlink";
+export type DesktopActionRole =
+  | "Button"
+  | "MenuItem"
+  | "Hyperlink"
+  | "Edit"
+  | "ComboBox"
+  | "Document"
+  | "List"
+  | "DataGrid"
+  | "Tree";
 
 export interface DesktopActionTarget {
   role: DesktopActionRole;
@@ -234,13 +246,30 @@ export interface DesktopActionTarget {
   bounds: CaptureRect;
 }
 
-export interface DesktopAction {
+interface DesktopActionBase {
   kind: DesktopActionKind;
   summary: string;
   target: DesktopActionTarget;
 }
 
+export interface DesktopClickAction extends DesktopActionBase {
+  kind: "click";
+}
+
+export interface DesktopSetTextAction extends DesktopActionBase {
+  kind: "setText";
+  text: string;
+}
+
+export interface DesktopScrollAction extends DesktopActionBase {
+  kind: "scroll";
+  direction: "up" | "down";
+}
+
+export type DesktopAction = DesktopClickAction | DesktopSetTextAction | DesktopScrollAction;
+
 export interface DesktopActionResult {
+  kind: DesktopActionKind;
   summary: string;
   target: DesktopActionTarget;
   verified: boolean;

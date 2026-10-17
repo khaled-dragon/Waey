@@ -662,6 +662,24 @@ body {
 .desktop-action-proposal-actions { display: flex; align-items: center; gap: 7px; }
 .desktop-action-proposal-actions .btn-primary,
 .desktop-action-proposal-actions .btn-secondary { min-height: 30px; }
+.desktop-action-text-preview {
+  display: grid;
+  gap: 4px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-coral) 6%, transparent);
+}
+.desktop-action-text-preview span { color: var(--text-secondary); font-size: 10px; font-weight: 600; }
+.desktop-action-text-preview pre {
+  max-height: 92px;
+  overflow: auto;
+  margin: 0;
+  color: var(--text-primary);
+  font: 11px/1.45 var(--font-mono, "Cascadia Code", monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .desktop-action-result { color: #27845d; font-size: 11px; font-weight: 600; }
 .theme-dark .desktop-action-result { color: #69c99a; }
 .desktop-action-error { color: var(--accent-coral); font-size: 11px; line-height: 1.4; }

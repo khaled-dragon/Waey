@@ -170,6 +170,55 @@ export function SettingsPanel({ errorMessage, isLoading, onChangeSettings, setti
             />
           </label>
 
+          <div className="developer-settings-card">
+            <div className="toggle-title">{isRtl ? "صلاحيات تنفيذ إضافية" : "Extra action permissions"}</div>
+            <div className="toggle-desc">
+              {isRtl
+                ? "كل اقتراح يظل ظاهرًا للمراجعة ويتطلب ضغط تنفيذ منفصل."
+                : "Every proposal is still previewed and needs its own Apply confirmation."}
+            </div>
+            <label className="toggle-row developer-toggle-row">
+              <div>
+                <div className="toggle-title">{isRtl ? "إدخال نصوص في الحقول" : "Enter text in fields"}</div>
+                <div className="toggle-desc">
+                  {isRtl ? "يسمح فقط بملء حقل مرئي ومتحقق منه، وليس كلمات مرور أو أسرار." : "Only fills a visible, verified field; passwords and secrets remain blocked."}
+                </div>
+              </div>
+              <input
+                className="setting-switch"
+                type="checkbox"
+                checked={settings.desktopActionCapabilities.includes("textEntry")}
+                disabled={isLoading || !settings.attachUiContext}
+                onChange={(event) => update(
+                  "desktopActionCapabilities",
+                  event.currentTarget.checked
+                    ? [...settings.desktopActionCapabilities, "textEntry"]
+                    : settings.desktopActionCapabilities.filter((capability) => capability !== "textEntry"),
+                )}
+              />
+            </label>
+            <label className="toggle-row developer-toggle-row">
+              <div>
+                <div className="toggle-title">{isRtl ? "التنقل داخل الصفحة" : "Navigate a verified view"}</div>
+                <div className="toggle-desc">
+                  {isRtl ? "يسمح بالتمرير للأعلى أو للأسفل داخل عنصر ظاهر ومتحقق منه." : "Allows an up or down scroll only inside a visible, verified view."}
+                </div>
+              </div>
+              <input
+                className="setting-switch"
+                type="checkbox"
+                checked={settings.desktopActionCapabilities.includes("screenNavigation")}
+                disabled={isLoading || !settings.attachUiContext}
+                onChange={(event) => update(
+                  "desktopActionCapabilities",
+                  event.currentTarget.checked
+                    ? [...settings.desktopActionCapabilities, "screenNavigation"]
+                    : settings.desktopActionCapabilities.filter((capability) => capability !== "screenNavigation"),
+                )}
+              />
+            </label>
+          </div>
+
           <label className="toggle-row">
             <div>
               <div className="toggle-title">{isRtl ? "التشغيل مع بدء الجهاز" : "Launch on startup"}</div>

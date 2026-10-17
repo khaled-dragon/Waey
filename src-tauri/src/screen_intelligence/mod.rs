@@ -1,4 +1,5 @@
 mod action;
+mod action_audit;
 mod context_cache;
 mod model;
 mod normalizer;
@@ -8,8 +9,10 @@ mod windows_uia;
 
 pub use action::{
     matches_desktop_action_target, validate_desktop_action, DesktopAction,
-    DesktopActionExecutionRequest, DesktopActionResult, DesktopActionTarget,
+    DesktopActionExecutionRequest, DesktopActionKind, DesktopActionResult, DesktopActionTarget,
+    DesktopScrollDirection,
 };
+pub use action_audit::{record_desktop_action_outcome, DesktopActionAuditOutcome};
 pub use context_cache::ScreenContextCache;
 pub use model::{
     ScreenContextDiagnostics, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,

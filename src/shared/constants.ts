@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   language: "en",
   autoCaptureOnOverlay: true,
   attachUiContext: true,
+  desktopActionCapabilities: [],
   launchOnStartup: false,
   selectedProviderId: "",
   selectedPersonaId: "",

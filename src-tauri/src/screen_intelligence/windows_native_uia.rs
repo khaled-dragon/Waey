@@ -6,8 +6,8 @@
 
 use super::{
     matches_desktop_action_target, validate_desktop_action, DesktopAction, DesktopActionResult,
-    ScreenContextCollector, ScreenContextPoint, ScreenContextSnapshot, UiContextRect,
-    UiElementSummary, VisibleWindowSummary,
+    DesktopScrollDirection, ScreenContextCollector, ScreenContextPoint, ScreenContextSnapshot,
+    UiContextRect, UiElementSummary, VisibleWindowSummary,
 };
 use std::sync::{
     mpsc::{self, Receiver, SyncSender, TrySendError},
@@ -16,7 +16,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use windows::{
-    core::Interface,
+    core::{Interface, BSTR},
     Win32::{
         Foundation::{HWND, POINT, RECT},
         System::Com::{
@@ -26,18 +26,21 @@ use windows::{
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
-                IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationTextPattern,
-                IUIAutomationValuePattern, TreeScope_Children, TreeScope_Descendants,
-                TreeScope_Element, UIA_AutomationIdPropertyId, UIA_BoundingRectanglePropertyId,
-                UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId, UIA_ClassNamePropertyId,
-                UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId, UIA_CustomControlTypeId,
+                IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationScrollPattern,
+                IUIAutomationTextPattern, IUIAutomationValuePattern, ScrollAmount_NoAmount,
+                ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement, TreeScope_Children,
+                TreeScope_Descendants, TreeScope_Element, UIA_AutomationIdPropertyId,
+                UIA_BoundingRectanglePropertyId, UIA_ButtonControlTypeId,
+                UIA_CheckBoxControlTypeId, UIA_ClassNamePropertyId, UIA_ComboBoxControlTypeId,
+                UIA_ControlTypePropertyId, UIA_CustomControlTypeId, UIA_DataGridControlTypeId,
                 UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_GroupControlTypeId,
                 UIA_HasKeyboardFocusPropertyId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
                 UIA_IsEnabledPropertyId, UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId,
-                UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId, UIA_NamePropertyId,
-                UIA_NativeWindowHandlePropertyId, UIA_PaneControlTypeId, UIA_ProcessIdPropertyId,
-                UIA_RadioButtonControlTypeId, UIA_TabItemControlTypeId, UIA_TextControlTypeId,
-                UIA_TextPatternId, UIA_TreeItemControlTypeId, UIA_ValuePatternId,
+                UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId,
+                UIA_NamePropertyId, UIA_NativeWindowHandlePropertyId, UIA_PaneControlTypeId,
+                UIA_ProcessIdPropertyId, UIA_RadioButtonControlTypeId, UIA_ScrollPatternId,
+                UIA_TabItemControlTypeId, UIA_TextControlTypeId, UIA_TextPatternId,
+                UIA_TreeControlTypeId, UIA_TreeItemControlTypeId, UIA_ValuePatternId,
                 UIA_WindowControlTypeId,
             },
             WindowsAndMessaging::{GetCursorPos, GetForegroundWindow},
@@ -459,22 +462,76 @@ impl NativeCollector {
         }
 
         let element = matches.pop().expect("match length was checked");
-        let invoke_pattern = unsafe {
-            element
-                .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
-                .map_err(|_| {
-                    "The verified control does not support a safe invoke action.".to_string()
-                })?
-        };
-        unsafe {
-            invoke_pattern
-                .Invoke()
-                .map_err(|error| format!("Windows rejected the verified action: {error}"))?;
+        match &action {
+            DesktopAction::Click { .. } => {
+                let invoke_pattern = unsafe {
+                    element
+                        .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
+                        .map_err(|_| {
+                            "The verified control does not support a safe invoke action."
+                                .to_string()
+                        })?
+                };
+                unsafe {
+                    invoke_pattern.Invoke().map_err(|error| {
+                        format!("Windows rejected the verified action: {error}")
+                    })?;
+                }
+            }
+            DesktopAction::SetText { text, .. } => {
+                // Password controls are omitted from snapshots and are never a valid
+                // text-entry target, even if a forged IPC payload reaches this worker.
+                if cached_password(&element) {
+                    return Err("Waey will not enter text into a password control.".to_string());
+                }
+                let value_pattern = unsafe {
+                    element
+                        .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+                        .map_err(|_| {
+                            "The verified field does not support safe text entry.".to_string()
+                        })?
+                };
+                let is_read_only = unsafe { value_pattern.CurrentIsReadOnly() }
+                    .map_err(|_| {
+                        "Waey could not verify whether the field is editable.".to_string()
+                    })?
+                    .as_bool();
+                if is_read_only {
+                    return Err("The verified field is read-only.".to_string());
+                }
+                let value = BSTR::from(text.as_str());
+                unsafe {
+                    value_pattern.SetValue(&value).map_err(|error| {
+                        format!("Windows rejected the verified text entry: {error}")
+                    })?;
+                }
+            }
+            DesktopAction::Scroll { direction, .. } => {
+                let scroll_pattern = unsafe {
+                    element
+                        .GetCurrentPatternAs::<IUIAutomationScrollPattern>(UIA_ScrollPatternId)
+                        .map_err(|_| {
+                            "The verified view does not support native scrolling.".to_string()
+                        })?
+                };
+                let vertical_amount = match direction {
+                    DesktopScrollDirection::Up => ScrollAmount_SmallDecrement,
+                    DesktopScrollDirection::Down => ScrollAmount_SmallIncrement,
+                };
+                unsafe {
+                    scroll_pattern
+                        .Scroll(ScrollAmount_NoAmount, vertical_amount)
+                        .map_err(|error| {
+                            format!("Windows rejected the verified scroll: {error}")
+                        })?;
+                }
+            }
         }
 
         Ok(DesktopActionResult {
-            summary: action.summary,
-            target: action.target,
+            kind: action.kind(),
+            summary: action.summary().to_string(),
+            target: action.target().clone(),
             verified: true,
         })
     }
@@ -739,16 +796,19 @@ fn control_type_name(control_type: i32) -> &'static str {
         value if value == UIA_CheckBoxControlTypeId.0 => "CheckBox",
         value if value == UIA_ComboBoxControlTypeId.0 => "ComboBox",
         value if value == UIA_CustomControlTypeId.0 => "Custom",
+        value if value == UIA_DataGridControlTypeId.0 => "DataGrid",
         value if value == UIA_DocumentControlTypeId.0 => "Document",
         value if value == UIA_EditControlTypeId.0 => "Edit",
         value if value == UIA_GroupControlTypeId.0 => "Group",
         value if value == UIA_HyperlinkControlTypeId.0 => "Hyperlink",
+        value if value == UIA_ListControlTypeId.0 => "List",
         value if value == UIA_ListItemControlTypeId.0 => "ListItem",
         value if value == UIA_MenuItemControlTypeId.0 => "MenuItem",
         value if value == UIA_PaneControlTypeId.0 => "Pane",
         value if value == UIA_RadioButtonControlTypeId.0 => "RadioButton",
         value if value == UIA_TabItemControlTypeId.0 => "TabItem",
         value if value == UIA_TextControlTypeId.0 => "Text",
+        value if value == UIA_TreeControlTypeId.0 => "Tree",
         value if value == UIA_TreeItemControlTypeId.0 => "TreeItem",
         value if value == UIA_WindowControlTypeId.0 => "Window",
         _ => "Unknown",

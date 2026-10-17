@@ -1,9 +1,23 @@
-import type { CaptureRect, DesktopAction, DesktopActionRole, DesktopActionTarget } from "../../shared/types";
+import type {
+  CaptureRect,
+  DesktopAction,
+  DesktopActionRole,
+  DesktopActionTarget,
+  DesktopScrollAction,
+} from "../../shared/types";
 
 const ACTION_MARKER_PATTERN = /<!--\s*WAEY_ACTION\s*:\s*([\s\S]*?)-->/gi;
 const MAX_SUMMARY_LENGTH = 240;
 const MAX_TARGET_TEXT_LENGTH = 240;
-const SAFE_ROLES = new Set<DesktopActionRole>(["Button", "MenuItem", "Hyperlink"]);
+const MAX_ENTRY_TEXT_LENGTH = 2_000;
+const CLICK_ROLES = new Set<DesktopActionRole>(["Button", "MenuItem", "Hyperlink"]);
+const TEXT_ENTRY_ROLES = new Set<DesktopActionRole>(["Edit", "ComboBox"]);
+const SCROLL_ROLES = new Set<DesktopActionRole>(["Document", "List", "DataGrid", "Tree"]);
+const SECRET_TERMS = [
+  "password", "passcode", "api key", "api_key", "access token", "refresh token", "bearer ",
+  "secret", "private key", "ssh-rsa", "كلمة المرور", "كلمه المرور", "رمز المرور",
+  "مفتاح api", "مفتاح الوصول", "رمز الوصول", "سر ",
+];
 
 export function extractDesktopAction(content: string): DesktopAction | null {
   const markers = [...content.matchAll(ACTION_MARKER_PATTERN)];
@@ -27,21 +41,44 @@ function parseDesktopAction(value: string): DesktopAction | null {
   try {
     const candidate: unknown = JSON.parse(value.trim());
 
-    if (!isRecord(candidate) || candidate.kind !== "click") {
+    if (!isRecord(candidate)) {
       return null;
     }
 
     const summary = normalizedText(candidate.summary, MAX_SUMMARY_LENGTH);
-    const target = parseTarget(candidate.target);
+    if (!summary) {
+      return null;
+    }
 
-    return summary && target ? { kind: "click", summary, target } : null;
+    switch (candidate.kind) {
+      case "click": {
+        const target = parseTarget(candidate.target, CLICK_ROLES);
+        return target ? { kind: "click", summary, target } : null;
+      }
+      case "setText": {
+        const target = parseTarget(candidate.target, TEXT_ENTRY_ROLES);
+        const text = exactEntryText(candidate.text);
+        return target && text !== null ? { kind: "setText", summary, target, text } : null;
+      }
+      case "scroll": {
+        const target = parseTarget(candidate.target, SCROLL_ROLES);
+        const direction = candidate.direction === "up" || candidate.direction === "down"
+          ? candidate.direction
+          : null;
+        return target && direction
+          ? ({ kind: "scroll", summary, target, direction } satisfies DesktopScrollAction)
+          : null;
+      }
+      default:
+        return null;
+    }
   } catch {
     return null;
   }
 }
 
-function parseTarget(value: unknown): DesktopActionTarget | null {
-  if (!isRecord(value) || !SAFE_ROLES.has(value.role as DesktopActionRole)) {
+function parseTarget(value: unknown, allowedRoles: Set<DesktopActionRole>): DesktopActionTarget | null {
+  if (!isRecord(value) || !allowedRoles.has(value.role as DesktopActionRole)) {
     return null;
   }
 
@@ -59,6 +96,15 @@ function parseTarget(value: unknown): DesktopActionTarget | null {
     automationId,
     bounds,
   };
+}
+
+function exactEntryText(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > MAX_ENTRY_TEXT_LENGTH) {
+    return null;
+  }
+
+  const lowerCaseValue = value.toLocaleLowerCase();
+  return value.includes("\0") || SECRET_TERMS.some((term) => lowerCaseValue.includes(term)) ? null : value;
 }
 
 function parseBounds(value: unknown): CaptureRect | null {

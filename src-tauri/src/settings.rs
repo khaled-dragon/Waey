@@ -14,6 +14,7 @@ pub struct AppSettings {
     pub language: LanguagePreference,
     pub auto_capture_on_overlay: bool,
     pub attach_ui_context: bool,
+    pub desktop_action_capabilities: Vec<DesktopActionCapability>,
     pub launch_on_startup: bool,
     pub selected_provider_id: Option<String>,
     pub selected_persona_id: Option<String>,
@@ -43,6 +44,15 @@ pub enum DeveloperAccessLevel {
     Ask,
     Assist,
     Auto,
+}
+
+/// Extra desktop capabilities are opt-in and intentionally separate from the
+/// per-action Apply button. New variants must remain disabled by default.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DesktopActionCapability {
+    TextEntry,
+    ScreenNavigation,
 }
 
 pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
@@ -93,6 +103,11 @@ pub fn save_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettin
             bool_to_string(settings.attach_ui_context).to_string(),
         ),
         (
+            "desktop_action_capabilities",
+            serde_json::to_string(&settings.desktop_action_capabilities)
+                .map_err(|error| error.to_string())?,
+        ),
+        (
             "launch_on_startup",
             bool_to_string(settings.launch_on_startup).to_string(),
         ),
@@ -141,6 +156,7 @@ pub fn default_settings() -> AppSettings {
         language: LanguagePreference::En,
         auto_capture_on_overlay: true,
         attach_ui_context: true,
+        desktop_action_capabilities: Vec::new(),
         launch_on_startup: false,
         selected_provider_id: None,
         selected_persona_id: None,
@@ -163,6 +179,24 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
         return Err("Developer mode supports up to 8 workspaces.".to_string());
     }
 
+    if settings.desktop_action_capabilities.len() > 2 {
+        return Err("Too many desktop action capabilities were requested.".to_string());
+    }
+
+    let has_duplicate_capability =
+        settings
+            .desktop_action_capabilities
+            .iter()
+            .enumerate()
+            .any(|(index, capability)| {
+                settings.desktop_action_capabilities[..index]
+                    .iter()
+                    .any(|previous| previous == capability)
+            });
+    if has_duplicate_capability {
+        return Err("Desktop action capabilities must be unique.".to_string());
+    }
+
     Ok(())
 }
 
@@ -174,6 +208,10 @@ fn apply_setting_value(settings: &mut AppSettings, key: &str, value: &str) {
         "language" => settings.language = language_from_string(value),
         "auto_capture_on_overlay" => settings.auto_capture_on_overlay = value == "true",
         "attach_ui_context" => settings.attach_ui_context = value == "true",
+        "desktop_action_capabilities" => {
+            settings.desktop_action_capabilities =
+                serde_json::from_str::<Vec<DesktopActionCapability>>(value).unwrap_or_default()
+        }
         "launch_on_startup" => settings.launch_on_startup = value == "true",
         "selected_provider_id" => settings.selected_provider_id = optional_setting(value),
         "selected_persona_id" => settings.selected_persona_id = optional_setting(value),

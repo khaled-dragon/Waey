@@ -19,7 +19,7 @@ The goal is simple: make AI feel closer to the work on your screen, not like a s
 - Fresh readable screen context on Windows for each prompt, including visible windows, active app, controls, bounds, focused or pointed elements, and selected text when available
 - Screenshot and readable screen context routed independently, so removing an image does not remove text context
 - Interactive Guide Mode that presents one verified step at a time, highlights a target when it is available, recaptures context after confirmation, and stays out of the user's way between steps
-- Optional Action Mode that proposes one safe visible control click at a time and requires Apply before Waey re-verifies and invokes it
+- Optional Action Mode that proposes a safe verified click, text entry, or small scroll, each requiring Apply before Waey re-verifies and acts
 - OpenAI-compatible provider support
 - OpenRouter, Ollama, Groq, and custom base URL support
 - Managed default Waey provider bootstrap for first-time users
@@ -59,9 +59,9 @@ Guide Mode never clicks, types, or changes desktop settings on the user's behalf
 
 ## Action Mode
 
-Action Mode is an intentionally narrow bridge between screen understanding and desktop interaction. When enabled for one prompt, Waey may propose a single click on a visible button, menu item, or link. It does not execute from model text: the proposal is shown with **Apply** and **Dismiss** controls first.
+Action Mode is an intentionally narrow bridge between screen understanding and desktop interaction. When enabled for one prompt, Waey may propose one safe action. Clicks on visible buttons, menu items, or links are available by default. Text entry and in-view scrolling are separately disabled by default and require explicit enablement in Settings. It does not execute from model text: every proposal is shown with **Apply** and **Dismiss** controls first, and text-entry proposals show the exact text before approval.
 
-After Apply, Waey hides its overlay, re-reads the original target window through native UI Automation, and requires one enabled, visible control to match the proposed role, label or automation id, and bounds. It then uses the control's native invoke pattern rather than raw mouse coordinates. Ambiguous, stale, sensitive, destructive, permission-related, and transaction-related controls are rejected locally. Action Mode cannot type, use keyboard shortcuts, run commands, access files, open arbitrary URLs, or bypass Developer Mode permissions.
+After Apply, Waey hides its overlay, re-reads the original target window through native UI Automation, and requires one enabled, visible control to match the proposed role, label or automation id, and bounds. It then uses the control's native invoke, value, or scroll pattern rather than raw mouse coordinates. Ambiguous, stale, password, sensitive, destructive, permission-related, and transaction-related controls are rejected locally. Passwords, tokens, keys, and other likely secrets are never entered. Action outcomes are recorded with fixed non-content reason codes, without storing labels, screenshots, summaries, or entered text. Action Mode cannot use keyboard shortcuts, run commands, access files, open arbitrary URLs, or bypass Developer Mode permissions.
 
 ## Developer Mode
 

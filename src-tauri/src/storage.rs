@@ -120,6 +120,17 @@ fn run_migrations(connection: &Connection) -> Result<(), String> {
             create table if not exists app_settings (
                 key text primary key,
                 value text not null
+             );
+
+             -- This intentionally contains no target labels, summaries, or entered
+             -- text. The audit trail must remain useful without retaining screen
+             -- content or sensitive form values.
+             create table if not exists desktop_action_audit (
+                 id text primary key,
+                 action_kind text not null,
+                 outcome text not null,
+                 reason_code text not null,
+                 created_at integer not null
             );",
         )
         .map_err(|error| error.to_string())?;

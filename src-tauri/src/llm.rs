@@ -1,5 +1,5 @@
 use crate::providers::{LlmProvider, ProviderKind};
-use crate::settings::{get_settings, DeveloperAccessLevel};
+use crate::settings::{get_settings, DesktopActionCapability, DeveloperAccessLevel};
 use crate::ui_context::UiContextSnapshot;
 use base64::{engine::general_purpose, Engine};
 use futures_util::StreamExt;
@@ -248,7 +248,10 @@ fn chat_request_body(app: &AppHandle, request: &LlmChatRequest) -> Result<Value,
     }
 
     if request.action_mode {
-        messages.push(desktop_action_system_message());
+        let capabilities = get_settings(app)
+            .map(|settings| settings.desktop_action_capabilities)
+            .unwrap_or_default();
+        messages.push(desktop_action_system_message(&capabilities));
     }
 
     if let Some(developer_context) = developer_attachment_message(request) {
@@ -281,17 +284,37 @@ fn chat_request_body(app: &AppHandle, request: &LlmChatRequest) -> Result<Value,
     Ok(body)
 }
 
-fn desktop_action_system_message() -> Value {
+fn desktop_action_system_message(capabilities: &[DesktopActionCapability]) -> Value {
+    let mut content = r#"Action Mode is active for this response only. You may propose at most one desktop action; Waey will never execute it unless the user separately presses Apply. Use the latest [WAEY SCREEN OBSERVATION] as the sole source of target details. A target must be currently visible and enabled.
+
+Never propose actions that send, submit, purchase, pay, download, install, upload, share, publish, delete, remove, reset, close, cancel, change security/privacy/permissions, or reveal credentials. Never use keyboard shortcuts, mouse coordinates, shell commands, file operations, or arbitrary URLs. If there is no clearly safe target, answer normally without an action marker.
+
+For every action: write a short user-facing explanation, then emit exactly one marker with valid JSON and no Markdown fence. Copy role, label, automationId, and bounds from the screen observation. Bounds are required. Do not put raw JSON anywhere else.
+
+The always-available safe action is one harmless navigation click on a visible Button, MenuItem, or Hyperlink:
+<!--WAEY_ACTION:{"kind":"click","summary":"Open Settings","target":{"role":"Button","label":"Settings","automationId":null,"bounds":{"x":120,"y":80,"width":96,"height":32}}}-->"#.to_string();
+
+    if capabilities.contains(&DesktopActionCapability::TextEntry) {
+        content.push_str(
+            r#"
+
+Text entry is explicitly enabled for this request. You may instead propose exactly one setText action only when the user explicitly supplied the exact non-sensitive text to enter. Target only a visible Edit or ComboBox. Never target a password field, never enter passwords, API keys, tokens, credentials, secrets, or private keys, and never press Enter or submit after entering text:
+<!--WAEY_ACTION:{"kind":"setText","summary":"Fill the search field","target":{"role":"Edit","label":"Search","automationId":null,"bounds":{"x":120,"y":80,"width":240,"height":32}},"text":"exact user-provided text"}-->"#,
+        );
+    }
+
+    if capabilities.contains(&DesktopActionCapability::ScreenNavigation) {
+        content.push_str(
+            r#"
+
+Screen navigation is explicitly enabled for this request. You may instead propose exactly one small up or down scroll on a visible Document, List, DataGrid, or Tree that supports native scrolling. Do not scroll a control with a sensitive or destructive label:
+<!--WAEY_ACTION:{"kind":"scroll","summary":"Scroll the article down","target":{"role":"Document","label":"Article","automationId":null,"bounds":{"x":120,"y":80,"width":640,"height":480}},"direction":"down"}-->"#,
+        );
+    }
+
     json!({
         "role": "system",
-        "content": r#"Action Mode is active for this response only. You may propose at most one desktop action; Waey will never execute it unless the user separately presses Apply. Use the latest [WAEY SCREEN OBSERVATION] as the sole source of target details. Propose only a harmless navigation click on one currently visible, enabled control whose role is exactly Button, MenuItem, or Hyperlink.
-
-Never propose actions that send, submit, purchase, pay, download, install, upload, share, publish, delete, remove, reset, close, cancel, change security/privacy/permissions, or reveal credentials. Do not propose typing, keyboard shortcuts, mouse coordinates, shell commands, file operations, or opening an arbitrary URL. If there is no clearly safe target, answer normally without an action marker.
-
-Write a short user-facing explanation, then, only when a safe visible target exists, emit exactly one marker with valid JSON and no Markdown fence:
-<!--WAEY_ACTION:{"kind":"click","summary":"Open Settings","target":{"role":"Button","label":"Settings","automationId":null,"bounds":{"x":120,"y":80,"width":96,"height":32}}}-->
-
-Copy role, label, automationId, and bounds from the screen observation. Bounds are required. Do not put raw JSON anywhere else."#
+        "content": content
     })
 }
 
